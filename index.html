@@ -7,7 +7,12 @@
         html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
         #renderCanvas { width: 100%; height: 100%; touch-action: none; }
     </style>
+
+    <!-- Babylon engine -->
     <script src="https://cdn.babylonjs.com/babylon.js"></script>
+
+    <!-- Physics engine ( REQUIRED ) -->
+    <script src="https://cdn.babylonjs.com/cannon.js"></script>
 </head>
 <body>
 <canvas id="renderCanvas"></canvas>
@@ -47,7 +52,10 @@ const createScene = () => {
     const groundMat = new BABYLON.StandardMaterial("groundMat", scene);
     groundMat.diffuseColor = BABYLON.Color3.FromHexString("#33FF4B");
     ground.material = groundMat;
-    ground.checkCollisions = true;
+
+    ground.physicsImpostor = new BABYLON.PhysicsImpostor(
+        ground, BABYLON.PhysicsImpostor.BoxImpostor, { mass: 0, friction: 1, restitution: 0.1 }
+    );
 
     // ----- ENABLE PHYSICS -----
     const gravityVector = new BABYLON.Vector3(0, -9.81, 0);
@@ -64,7 +72,8 @@ const createScene = () => {
     sphere.material = sphereMat;
 
     sphere.physicsImpostor = new BABYLON.PhysicsImpostor(
-        sphere, BABYLON.PhysicsImpostor.SphereImpostor, { mass: 1, friction: 0.5, restitution: 0.2 }
+        sphere, BABYLON.PhysicsImpostor.SphereImpostor,
+        { mass: 1, friction: 0.5, restitution: 0.2 }
     );
 
     // ----- PLAYER MOVEMENT -----
@@ -99,21 +108,19 @@ const createScene = () => {
             new BABYLON.Vector3(vel.x + moveX, vel.y, vel.z + moveZ)
         );
 
-        // Check for respawn
         if (sphere.position.y < -20) {
             sphere.position.set(0, 10, 0);
             sphere.physicsImpostor.setLinearVelocity(new BABYLON.Vector3(0, 0, 0));
         }
     });
 
-    // Detect landing (reset jump)
     sphere.physicsImpostor.registerOnPhysicsCollide(ground.physicsImpostor, () => {
         canJump = true;
     });
 
     // ----- RANDOM CUBES -----
     function spawnCube() {
-        const safeRadius = 5; // avoid player
+        const safeRadius = 5;
         let x, z;
 
         do {
@@ -129,11 +136,11 @@ const createScene = () => {
         cube.material = mat;
 
         cube.physicsImpostor = new BABYLON.PhysicsImpostor(
-            cube, BABYLON.PhysicsImpostor.BoxImpostor, { mass: 1, friction: 1, restitution: 0.1 }
+            cube, BABYLON.PhysicsImpostor.BoxImpostor,
+            { mass: 1, friction: 1, restitution: 0.1 }
         );
     }
 
-    // Spawn a bunch of cubes
     for (let i = 0; i < 25; i++) spawnCube();
 
     return scene;
@@ -141,8 +148,6 @@ const createScene = () => {
 
 const scene = createScene();
 engine.runRenderLoop(() => scene.render());
-
-// Resize if window changes size
 window.addEventListener("resize", () => engine.resize());
 </script>
 </body>
