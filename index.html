@@ -34,10 +34,10 @@ const SETTINGS = {
   skyColor:    "#9DE9FF",
   cubeCount:   30,
   respawnY:   -20,
-  moveForce:   18,       // stronger for impulse-based control
+  moveForce:   18,
   maxSpeed:    8,
   jumpForce:   6.2,
-  damp:        0.98,     // slight damping
+  damp:        0.95, // stronger damping for natural slowdown
   coatTexture: "box-texture.png",
   coatSize:    2.04,
   cubeSize:    2,
@@ -56,14 +56,14 @@ function createScene() {
   new BABYLON.HemisphericLight("light", new BABYLON.Vector3(0,1,0), scene);
   scene.enablePhysics(new BABYLON.Vector3(0,-9.81,0), new BABYLON.CannonJSPlugin());
 
-  /* ---------------- GROUND ---------------- */
+  // Ground
   const ground = BABYLON.MeshBuilder.CreateGround("ground",{width:300,height:300},scene);
   const gMat = new BABYLON.StandardMaterial("gMat",scene);
   gMat.diffuseColor = BABYLON.Color3.FromHexString(SETTINGS.groundColor);
   ground.material = gMat;
   ground.physicsImpostor = new BABYLON.PhysicsImpostor(ground,BABYLON.PhysicsImpostor.BoxImpostor,{mass:0,friction:2,restitution:0},scene);
 
-  /* ---------------- PLAYER SPHERE ---------------- */
+  // Player sphere
   const sphere = BABYLON.MeshBuilder.CreateSphere("player",{diameter:2},scene);
   sphere.position.set(0,3,0);
   const sMat = new BABYLON.StandardMaterial("sMat",scene);
@@ -71,7 +71,7 @@ function createScene() {
   sphere.material = sMat;
   sphere.physicsImpostor = new BABYLON.PhysicsImpostor(sphere,BABYLON.PhysicsImpostor.SphereImpostor,{mass:1,friction:0.6,restitution:0.05},scene);
 
-  /* ---------------- ARROWS ---------------- */
+  // Arrows
   function makeArrow(name,color){
     const a = BABYLON.MeshBuilder.CreatePlane(name,{size:1.2},scene);
     const m = new BABYLON.StandardMaterial(name+"Mat",scene);
@@ -82,7 +82,6 @@ function createScene() {
     a.parent = sphere;
     return a;
   }
-
   const arrows = {
     forward: makeArrow("aF","#00FF00"),
     back:    makeArrow("aB","#FF0000"),
@@ -100,7 +99,7 @@ function createScene() {
     arrows.right.material.emissiveColor   = i.right   ? BABYLON.Color3.White() : BABYLON.Color3.Black();
   }
 
-  /* ---------------- RAMPS ---------------- */
+  // Ramps
   for(const r of RAMPS){
     const ramp = BABYLON.MeshBuilder.CreateBox("ramp",{width:12,depth:8,height:2},scene);
     const m = new BABYLON.StandardMaterial("rm",scene);
@@ -111,7 +110,7 @@ function createScene() {
     ramp.physicsImpostor = new BABYLON.PhysicsImpostor(ramp,BABYLON.PhysicsImpostor.BoxImpostor,{mass:0,friction:1,restitution:0},scene);
   }
 
-  /* ---------------- CUBES ---------------- */
+  // Cubes
   const cubes=[];
   const sharedCoatTexture = new BABYLON.Texture(SETTINGS.coatTexture,scene);
   function spawnCube(x,z,y){
@@ -140,7 +139,7 @@ function createScene() {
     spawnCube(x,z, 8+Math.random()*12);
   }
 
-  /* ---------------- CAMERA ---------------- */
+  // Camera
   const camera = new BABYLON.ArcRotateCamera("cam",0,BABYLON.Tools.ToRadians(55),18,sphere.position.clone(),scene);
   camera.attachControl(canvas,true);
   camera.lowerRadiusLimit=6; camera.upperRadiusLimit=40; camera.wheelDeltaPercentage=0.01;
@@ -159,7 +158,7 @@ function createScene() {
     }
   });
 
-  /* ---------------- INPUT ---------------- */
+  // Input
   const input={forward:false,back:false,left:false,right:false,jump:false};
   window.addEventListener("keydown",e=>{
     const k=e.key.toLowerCase();
@@ -178,7 +177,7 @@ function createScene() {
     if(e.key===" ")input.jump=false;
   });
 
-  /* ---------------- GAME LOOP ---------------- */
+  // Game loop
   const rayDown = new BABYLON.Vector3(0,-1,0);
   let lastMove = new BABYLON.Vector3(0,0,1);
 
@@ -214,9 +213,12 @@ function createScene() {
     if(dir.lengthSquared()>0.001){
       dir.normalize();
       lastMove.copyFrom(dir);
-      // Apply impulse for sphere rolling
       const impulse = dir.scale(SETTINGS.moveForce * engine.getDeltaTime()*0.03);
       sphere.physicsImpostor.applyImpulse(impulse, sphere.getAbsolutePosition());
+    } else {
+      // Apply slowdown damping when no keys pressed
+      const v = sphere.physicsImpostor.getLinearVelocity();
+      sphere.physicsImpostor.setLinearVelocity(new BABYLON.Vector3(v.x*SETTINGS.damp, v.y, v.z*SETTINGS.damp));
     }
 
     if(input.jump && grounded()){
@@ -246,7 +248,6 @@ function createScene() {
 
     camera.target = BABYLON.Vector3.Lerp(camera.target, sphere.position,0.28);
 
-    // Update camera angle display
     let angleDeg = (camera.alpha*180/Math.PI)%360;
     if(angleDeg<0) angleDeg+=360;
     angleDisplay.textContent = "Angle: "+angleDeg.toFixed(0)+"°";
