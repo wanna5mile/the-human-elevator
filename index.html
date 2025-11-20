@@ -2,11 +2,57 @@
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>Babylon — 3rd Person Sphere</title>
+  <title>Babylon — 3rd Person Sphere (With Rings, Counter & Multiplayer)</title>
   <link rel="icon" href="awodas.png" type="image/png">
   <style>
-    html,body { width:100%; height:100%; margin:0; overflow:hidden; }
+    html,body { width:100%; height:100%; margin:0; overflow:hidden; font-family: Inter, system-ui, sans-serif; }
     #renderCanvas { width:100%; height:100%; touch-action:none; display:block; }
+    /* UI overlay */
+    #ui {
+      position: absolute;
+      left: 12px;
+      top: 12px;
+      z-index: 50;
+      color: white;
+      text-shadow: 0 2px 6px rgba(0,0,0,0.7);
+      user-select: none;
+    }
+    #coinCounter {
+      background: rgba(0,0,0,0.45);
+      padding: 10px 14px;
+      border-radius: 8px;
+      font-size: 18px;
+      min-width: 120px;
+    }
+    #multiplier {
+      margin-top: 8px;
+      background: rgba(0,0,0,0.35);
+      padding: 8px 12px;
+      border-radius: 8px;
+      font-size: 14px;
+    }
+    /* networking controls */
+    #netUI {
+      position: absolute;
+      right: 12px;
+      top: 12px;
+      z-index: 50;
+      color: white;
+      font-size: 13px;
+    }
+    #netUI input { padding:6px; border-radius:6px; border:none; margin-right:6px; }
+    #netUI button { padding:6px 10px; border-radius:6px; border:none; cursor:pointer; }
+    #otherPlayersLabel {
+      position: absolute;
+      right: 12px;
+      top: 70px;
+      z-index: 50;
+      color: white;
+      font-size: 13px;
+      background: rgba(0,0,0,0.35);
+      padding:8px;
+      border-radius:8px;
+    }
   </style>
 
   <!-- Babylon -->
@@ -21,9 +67,23 @@
 <body>
 <canvas id="renderCanvas"></canvas>
 
+<div id="ui">
+  <div id="coinCounter">Coins: <span id="coinsValue">0</span></div>
+  <div id="multiplier" style="display:none;">Multiplier: <span id="multValue">2x</span> — <span id="multTime">30</span>s</div>
+</div>
+
+<div id="netUI">
+  <input id="roomInput" placeholder="room id (optional)" />
+  <input id="serverInput" placeholder="ws://signaling.server:port" style="width:220px"/>
+  <button id="connectBtn">Connect</button>
+  <div id="netStatus" style="margin-top:6px;font-size:12px;opacity:0.9"></div>
+</div>
+
+<div id="otherPlayersLabel" style="display:none;">Other Players: <span id="otherCount">0</span></div>
+
 <script>
 /* ============================================================
-   INIT
+   INIT + SETTINGS
 ============================================================ */
 const canvas = document.getElementById("renderCanvas");
 const engine = new BABYLON.Engine(canvas, true);
@@ -50,7 +110,15 @@ const SETTINGS = {
 
   swimUpSpeed: 4,
   coinMax: 32,
-  coinRespawnSec: 45
+  coinRespawnSec: 45,
+
+  ringRadius: 5.0,
+  ringThickness: 0.6,
+  ringHeightOffset: 6.0,       // how high above ramp center the ring sits
+  ringProximity: 4.0,          // how close to ring center (horizontal) to count as going through
+  ringHeightTolerance: 3.0,    // y distance tolerance from ring center to count as passing through
+  ringMultiplier: 2,
+  ringDurationSec: 30
 };
 
 // 3 spawn zones (where blocks can't spawn). Each spawn zone also acts as a "save zone".
@@ -72,7 +140,6 @@ function dist2(a,b){ const dx=a.x-b.x, dz=a.z-b.z; return Math.hypot(dx,dz); }
 
 /* ============================================================
    TRIANGULAR RAMP
-   (uses Vector2 shape for ExtrudePolygon)
 ============================================================ */
 function makeTriRamp(scene) {
   const shape = [
@@ -105,7 +172,7 @@ function makeTriRamp(scene) {
 }
 
 /* ============================================================
-   Create scene (main)
+   MAIN SCENE
 ============================================================ */
 function createScene(){
   const scene = new BABYLON.Scene(engine);
@@ -114,7 +181,7 @@ function createScene(){
   new BABYLON.HemisphericLight("light", new BABYLON.Vector3(0,1,0), scene);
   scene.enablePhysics(new BABYLON.Vector3(0, -9.81, 0), new BABYLON.CannonJSPlugin());
 
-  /* ---------------- GROUND (solid box) ---------------- */
+  /* ---------------- GROUND ---------------- */
   const groundSize = 300;
   const groundHeight = 10;
   const ground = BABYLON.MeshBuilder.CreateBox("ground", {
@@ -122,7 +189,6 @@ function createScene(){
   }, scene);
   ground.position.y = -groundHeight/2; // top at y=0
 
-  // multi-material: 4 sides = brown, top = green, bottom = brown
   const matTop = new BABYLON.StandardMaterial("matTop", scene);
   matTop.diffuseColor = BABYLON.Color3.FromHexString(SETTINGS.groundTopColor);
   const matSide = new BABYLON.StandardMaterial("matSide", scene);
@@ -145,7 +211,7 @@ function createScene(){
     { mass:0, friction:2, restitution:0 }, scene
   );
 
-  /* ---------------- WATER (raised a bit) ---------------- */
+  /* ---------------- WATER ---------------- */
   const water = BABYLON.MeshBuilder.CreateGround("water", {
     width: 700, height: 700
   }, scene);
@@ -157,21 +223,20 @@ function createScene(){
   waterMat.windForce = 3.0;
   waterMat.waterColor = new BABYLON.Color3.FromHexString(SETTINGS.waterColor);
   water.material = waterMat;
-  // ensure it renders ground and ramps
   waterMat.addToRenderList(ground);
 
-  /* ---------------- PLAYER SPHERE ---------------- */
+  /* ---------------- PLAYER ---------------- */
   const sphere = BABYLON.MeshBuilder.CreateSphere("player", { diameter:2 }, scene);
   sphere.position.set(0,3,0);
   const sphereMat = new BABYLON.StandardMaterial("sphereMat", scene);
-  sphereMat.diffuseColor = BABYLON.Color3.Random();
+  sphereMat.diffuseColor = new BABYLON.Color3(0.2, 0.6, 1.0);
   sphere.material = sphereMat;
   sphere.physicsImpostor = new BABYLON.PhysicsImpostor(
     sphere, BABYLON.PhysicsImpostor.SphereImpostor,
     { mass:1, friction:0.6, restitution:0.05 }, scene
   );
 
-  /* ---------------- TRIANGULAR RAMPS (lifted) ---------------- */
+  /* ---------------- RAMPS (lifted) ---------------- */
   const ramps = RAMPS.map(r=>{
     const ramp = makeTriRamp(scene);
     ramp.position.set(r.x, 1.8, r.z); // LIFTED MORE so it sits well above ground
@@ -180,8 +245,28 @@ function createScene(){
   });
   function onRampBoost(){
     const v = sphere.physicsImpostor.getLinearVelocity();
-    // stronger vertical boost + small forward impulse along ramp normal
     sphere.physicsImpostor.setLinearVelocity(new BABYLON.Vector3(v.x, 12, v.z));
+  }
+
+  /* ---------------- RINGS (one near each ramp) ---------------- */
+  const rings = [];
+  for(let i=0;i<ramps.length;i++){
+    const r = ramps[i];
+    const center = r.position.clone();
+    center.y += SETTINGS.ringHeightOffset;
+    // torus for ring visual; rotate so it's vertical
+    const tor = BABYLON.MeshBuilder.CreateTorus("ring"+i, {
+      diameter: SETTINGS.ringRadius*2,
+      thickness: SETTINGS.ringThickness,
+      tessellation: 48
+    }, scene);
+    tor.position.copyFrom(center);
+    tor.rotation.x = Math.PI/2;
+    const rm = new BABYLON.StandardMaterial("ringMat"+i, scene);
+    rm.emissiveColor = new BABYLON.Color3(0.9, 0.6, 0.1);
+    rm.alpha = 0.9;
+    tor.material = rm;
+    rings.push({mesh: tor, center: center, usedBy: new Set()}); // usedBy to avoid repeatedly granting
   }
 
   /* ------------------------------------------------------
@@ -194,10 +279,9 @@ function createScene(){
     return false;
   }
 
-  /* ----------------- RANDOM CUBES (small obstacles) ----------------- */
+  /* ----------------- RANDOM CUBES ----------------- */
   const cubes = [];
   for (let i=0;i<SETTINGS.cubeCount;i++){
-    // find a spawn that is not inside spawn zones and not too near origin
     let x,z;
     let tries = 0;
     do {
@@ -218,7 +302,7 @@ function createScene(){
     cubes.push(b);
   }
 
-  /* ----------------- HILL CUBES (bigger, styled like ground) ----------------- */
+  /* ----------------- HILLS ----------------- */
   const hills = [];
   const hillCount = SETTINGS.hillCount;
   for(let i=0;i<hillCount;i++){
@@ -242,7 +326,6 @@ function createScene(){
     hm.subMaterials = [sideMat,sideMat,sideMat,sideMat,topMat,sideMat];
     hill.material = hm;
 
-    // assign submeshes for hill faces
     hill.subMeshes = [];
     const vcount = hill.getTotalVertices();
     let idxStart = 0;
@@ -258,7 +341,7 @@ function createScene(){
     hills.push(hill);
   }
 
-  /* ----------------- ARROWS (visual) ----------------- */
+  /* ----------------- ARROWS ----------------- */
   function makeArrow(name,color){
     const p = BABYLON.MeshBuilder.CreatePlane(name,{size:1},scene);
     const mm = new BABYLON.StandardMaterial(name+"Mat",scene);
@@ -291,16 +374,13 @@ function createScene(){
   const coinRadius = 1.0;
 
   function findSafeCoinPosition(){
-    // attempts to find a pos on ground avoiding spawn zones and other objects
     const margin = 8;
     const attempts = 300;
     for(let i=0;i<attempts;i++){
       const x = rndRange(-groundSize/2 + margin, groundSize/2 - margin);
       const z = rndRange(-groundSize/2 + margin, groundSize/2 - margin);
-      // don't spawn too close to player start
       if(Math.hypot(x, z) < SETTINGS.safeRadius*0.8) continue;
       if(insideAnySpawnZone(x,z)) continue;
-      // avoid other coins
       let ok = true;
       for(const c of coins){
         if(c && c.position && Math.hypot(c.position.x - x, c.position.z - z) < 3){ ok=false; break; }
@@ -308,7 +388,6 @@ function createScene(){
       if(!ok) continue;
       return {x,z};
     }
-    // fallback to center-ish
     return {x: 10, z: 10};
   }
 
@@ -328,7 +407,6 @@ function createScene(){
     coinState[i].active = true;
   }
 
-  // spawn initial coins up to cap
   const coinCap = SETTINGS.coinMax;
   for(let i=0;i<coinCap;i++){
     spawnSingleCoin(i);
@@ -338,7 +416,6 @@ function createScene(){
     if(!coins[i]) return;
     coins[i].isVisible = false;
     coinState[i].active = false;
-    // schedule respawn in coinRespawnSec seconds at a new safe spot
     const ms = SETTINGS.coinRespawnSec * 1000;
     if(coinState[i].timerId) clearTimeout(coinState[i].timerId);
     coinState[i].timerId = setTimeout(()=>{
@@ -372,7 +449,143 @@ function createScene(){
   camera.upperRadiusLimit = 40;
 
   /* ============================================================
-     GAME LOOP (movement / swim / boost / coins)
+     GAME STATE: coins collected & multiplier
+  ============================================================ */
+  let coinsCollected = 0;
+  let multiplierActive = false;
+  let multiplierExpireAt = 0; // epoch ms
+  const coinCounterEl = document.getElementById("coinsValue");
+  const multEl = document.getElementById("multiplier");
+  const multTimeEl = document.getElementById("multTime");
+
+  function setMultiplierActive(active){
+    multiplierActive = active;
+    if(!active){
+      multEl.style.display = "none";
+    } else {
+      multEl.style.display = "block";
+    }
+  }
+  setMultiplierActive(false);
+
+  function grantMultiplier(durationSec){
+    const now = Date.now();
+    multiplierExpireAt = Math.max(multiplierExpireAt, now) + durationSec*1000;
+    setMultiplierActive(true);
+  }
+
+  /* ============================================================
+     MULTIPLAYER (lightweight sync)
+     - Simple WebSocket-based broadcast protocol (optional)
+     - If signaling server not set, client stays singleplayer but still shows UI
+     Protocol (JSON messages):
+       { type: "join", room, id }
+       { type: "state", room, id, x, y, z, colorHex, coinsCollected }
+       { type: "leave", room, id }
+     The server should broadcast messages to all clients in same room.
+  ============================================================ */
+  let socket = null;
+  let playerId = Math.random().toString(36).slice(2,10);
+  let room = "";
+  let SIGNALING_SERVER = ""; // set by UI input
+  const otherPlayers = new Map(); // id -> {mesh, lastUpdated, coins}
+  const otherCountEl = document.getElementById("otherCount");
+  const otherPlayersLabel = document.getElementById("otherPlayersLabel");
+  const netStatus = document.getElementById("netStatus");
+
+  function connectNetworking(url, roomId){
+    if(socket){ try { socket.close(); } catch(e){} }
+    SIGNALING_SERVER = url;
+    room = roomId || "";
+    if(!SIGNALING_SERVER){
+      netStatus.textContent = "No signaling server set (local-only).";
+      return;
+    }
+    try {
+      socket = new WebSocket(SIGNALING_SERVER);
+    } catch(e){
+      netStatus.textContent = "Failed to create WebSocket.";
+      return;
+    }
+    socket.onopen = ()=> {
+      netStatus.textContent = "Connected. Joining room: " + room;
+      // send join
+      socket.send(JSON.stringify({ type:"join", room, id: playerId }));
+      // send initial state quickly
+      sendState();
+    };
+    socket.onmessage = (ev)=>{
+      try {
+        const msg = JSON.parse(ev.data);
+        if(msg.id === playerId) return; // ignore own messages
+        if(msg.type === "state"){
+          if(msg.room !== room) return;
+          // update or create other player
+          let op = otherPlayers.get(msg.id);
+          if(!op){
+            // create sphere for other player
+            const s = BABYLON.MeshBuilder.CreateSphere("other_"+msg.id, {diameter:1.8}, scene);
+            const m = new BABYLON.StandardMaterial("otherMat_"+msg.id, scene);
+            if(msg.colorHex) {
+              try {
+                m.diffuseColor = BABYLON.Color3.FromHexString(msg.colorHex);
+              } catch(e){ m.diffuseColor = BABYLON.Color3.Random(); }
+            } else {
+              m.diffuseColor = BABYLON.Color3.Random();
+            }
+            s.material = m;
+            otherPlayers.set(msg.id, { mesh: s, lastUpdated: Date.now(), coins: msg.coins || 0 });
+            otherPlayersLabel.style.display = "block";
+          }
+          op = otherPlayers.get(msg.id);
+          if(op){
+            op.mesh.position.set(msg.x, msg.y, msg.z);
+            op.lastUpdated = Date.now();
+            op.coins = msg.coins || op.coins;
+          }
+        } else if(msg.type === "join"){
+          // optional: show join
+        } else if(msg.type === "leave"){
+          if(otherPlayers.has(msg.id)){
+            const op = otherPlayers.get(msg.id);
+            try { op.mesh.dispose(); } catch(e){}
+            otherPlayers.delete(msg.id);
+          }
+        }
+        otherCountEl.textContent = otherPlayers.size;
+      } catch(e){
+        console.warn("bad ws message", e);
+      }
+    };
+    socket.onclose = ()=> netStatus.textContent = "Disconnected.";
+    socket.onerror = (e)=> netStatus.textContent = "WebSocket error.";
+  }
+
+  function sendState(){
+    if(!socket || socket.readyState !== WebSocket.OPEN) return;
+    const colorHex = sphere.material && sphere.material.diffuseColor ? "#" + sphere.material.diffuseColor.toHexString().slice(1) : null;
+    const msg = {
+      type: "state",
+      room,
+      id: playerId,
+      x: sphere.position.x,
+      y: sphere.position.y,
+      z: sphere.position.z,
+      colorHex,
+      coins: coinsCollected
+    };
+    socket.send(JSON.stringify(msg));
+  }
+
+  // UI hookup for networking
+  document.getElementById("connectBtn").addEventListener("click", ()=>{
+    const roomVal = document.getElementById("roomInput").value.trim();
+    const serverVal = document.getElementById("serverInput").value.trim();
+    connectNetworking(serverVal, roomVal);
+  });
+
+  /* ============================================================
+     MAIN GAME LOOP
   ============================================================ */
   let lastMove = new BABYLON.Vector3(0,0,1);
   const worldForward = new BABYLON.Vector3(0,0,1);
@@ -427,10 +640,9 @@ function createScene(){
       sphere.physicsImpostor.setLinearVelocity(new BABYLON.Vector3(v2.x, SETTINGS.jumpForce, v2.z));
     }
 
-    // swim behaviour (if under water surface)
+    // swim behaviour
     const swimThreshold = water.position.y + 1.2;
     if(sphere.position.y < swimThreshold){
-      // buoyancy
       sphere.physicsImpostor.setLinearVelocity(
         new BABYLON.Vector3(v.x * 0.9, v.y + 0.08, v.z * 0.9)
       );
@@ -439,10 +651,35 @@ function createScene(){
       }
     }
 
-    // ramp boost detection (distance from ramp position)
+    // ramp boost detection
     for(const ramp of ramps){
       if(BABYLON.Vector3.Distance(sphere.position, ramp.position) < 6){
         onRampBoost();
+      }
+    }
+
+    // ring detection: if player is within horizontal proximity of ring center AND within height tolerance,
+    // grant multiplier. We use rings[].usedBy to avoid granting repeatedly while staying within ring.
+    for(const ring of rings){
+      const dx = sphere.position.x - ring.center.x;
+      const dz = sphere.position.z - ring.center.z;
+      const horizDist = Math.hypot(dx, dz);
+      const heightDiff = Math.abs(sphere.position.y - ring.center.y);
+      if(horizDist < SETTINGS.ringProximity && heightDiff < SETTINGS.ringHeightTolerance){
+        if(!ring.usedBy.has(playerId)){
+          // grant multiplier
+          grantMultiplier(SETTINGS.ringDurationSec);
+          ring.usedBy.add(playerId);
+          // visual pulse (scale up then back)
+          const s = ring.mesh;
+          BABYLON.Animation.CreateAndStartAnimation("pulse", s, "scaling.x", 30, 12, s.scaling.x, s.scaling.x*1.4, BABYLON.Animation.ANIMATIONLOOPMODE_CYCLE);
+          BABYLON.Animation.CreateAndStartAnimation("pulsey", s, "scaling.y", 30, 12, s.scaling.y, s.scaling.y*1.4, BABYLON.Animation.ANIMATIONLOOPMODE_CYCLE);
+        }
+      } else {
+        // leaving ring area: remove flag so you can re-trigger next time you re-enter
+        if(ring.usedBy.has(playerId)){
+          ring.usedBy.delete(playerId);
+        }
       }
     }
 
@@ -451,9 +688,27 @@ function createScene(){
       const coin = coins[i];
       if(!coin || !coin.isVisible) continue;
       const d = Math.hypot(coin.position.x - sphere.position.x, coin.position.z - sphere.position.z);
-      if(d < 1.3){
+      const heightDiff = Math.abs(coin.position.y - sphere.position.y);
+      if(d < 1.3 && heightDiff < 2.2){
         // picked up
         hideAndScheduleRespawn(i);
+        let award = 1;
+        if(multiplierActive && Date.now() < multiplierExpireAt) {
+          award *= SETTINGS.ringMultiplier;
+        }
+        coinsCollected += award;
+        coinCounterEl.textContent = coinsCollected;
+        // send state to peers
+        sendState();
+      }
+    }
+
+    // multiplier UI update
+    if(multiplierActive){
+      const remaining = Math.max(0, Math.ceil((multiplierExpireAt - Date.now())/1000));
+      multTimeEl.textContent = remaining;
+      if(remaining <= 0){
+        setMultiplierActive(false);
       }
     }
 
@@ -465,11 +720,24 @@ function createScene(){
 
     // camera follow
     camera.target = BABYLON.Vector3.Lerp(camera.target, sphere.position, 0.35);
+
+    // occasionally send our state to other players (throttled)
+    if(Math.random() < 0.06) sendState();
+
+    // cleanup stale other players (if no update for a while)
+    const now = Date.now();
+    for(const [id,op] of Array.from(otherPlayers.entries())){
+      if(now - op.lastUpdated > 12000){ // 12s stale
+        try { op.mesh.dispose(); } catch(e){}
+        otherPlayers.delete(id);
+      }
+    }
+    otherCountEl.textContent = otherPlayers.size;
+    otherPlayersLabel.style.display = otherPlayers.size>0 ? "block" : "none";
   });
 
   return scene;
 }
-
 
 /* ============================================================
    START ENGINE
