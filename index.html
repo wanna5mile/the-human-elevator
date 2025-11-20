@@ -95,9 +95,14 @@ const createScene = () => {
 
   function spawnCube(x,z,y=8){
     const c = BABYLON.MeshBuilder.CreateBox("cube",{size:2},scene);
-    const cm = new BABYLON.StandardMaterial("cubeMat", scene);
-    cm.diffuseColor = BABYLON.Color3.Random();
-    c.material = cm;
+// Textured cube material (fills 100% of each face)
+const cm = new BABYLON.StandardMaterial("cubeMat", scene);
+cm.diffuseTexture = new BABYLON.Texture("box-texture.png", scene);
+cm.diffuseTexture.hasAlpha = true;       // allow transparency
+cm.useAlphaFromDiffuseTexture = true;    // keeps your overlay transparent
+cm.specularColor = BABYLON.Color3.Black(); // no shiny reflections
+cm.backFaceCulling = false;              // render both sides cleanly
+c.material = cm;
 
     c.position.set(x,y,z);
 
