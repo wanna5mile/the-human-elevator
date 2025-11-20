@@ -1,74 +1,170 @@
 <!DOCTYPE html>
 <html>
 <head>
-<meta charset="utf-8" />
-<title>Babylon — Camera-Aligned Movement</title>
-<style>
-  html,body { width:100%; height:100%; margin:0; overflow:hidden; }
-  #renderCanvas { width:100%; height:100%; touch-action:none; display:block; }
-  #angleDisplay {
-    position: absolute;
-    top: 10px; right: 10px;
-    color: white;
-    font-family: monospace;
-    background: rgba(0,0,0,0.5);
-    padding: 6px 12px;
-    border-radius: 6px;
-  }
-</style>
-<script src="https://cdn.babylonjs.com/babylon.js"></script>
-<script src="https://cdn.babylonjs.com/cannon.js"></script>
+  <meta charset="utf-8" />
+  <title>Babylon — 3rd Person Sphere</title>
+  <style>
+    html,body { width:100%; height:100%; margin:0; overflow:hidden; }
+    #renderCanvas { width:100%; height:100%; touch-action:none; display:block; }
+    #angleDisplay {
+      position: absolute;
+      top: 10px; right: 10px;
+      color: white;
+      font-family: monospace;
+      background: rgba(0,0,0,0.5);
+      padding: 6px 12px;
+      border-radius: 6px;
+      z-index: 100;
+    }
+  </style>
+
+  <script src="https://cdn.babylonjs.com/babylon.js"></script>
+  <script src="https://cdn.babylonjs.com/cannon.js"></script>
 </head>
 <body>
 <canvas id="renderCanvas"></canvas>
 <div id="angleDisplay">Angle: 0°</div>
 
 <script>
+/* ============================================================
+   INIT
+============================================================ */
 const canvas = document.getElementById("renderCanvas");
-const engine = new BABYLON.Engine(canvas,true);
+const engine = new BABYLON.Engine(canvas, true);
 
 const SETTINGS = {
   groundColor: "#33FF4B",
-  skyColor: "#9DE9FF",
-  moveForce: 8,
-  maxSpeed: 8,
-  jumpForce: 6,
-  damp: 0.9,
-  respawnY: -20
+  skyColor:    "#9DE9FF",
+  cubeCount:   30,
+  respawnY:   -20,
+  moveForce:   7.5,
+  maxSpeed:    8,
+  jumpForce:   6.2,
+  damp:        0.92,
+  coatTexture: "box-texture.png",
+  coatSize:    2.04,
+  cubeSize:    2,
+  safeRadius:  8
 };
 
-/* ---------------- SCENE ---------------- */
+const RAMPS = [
+  { x: 20,  z: 20,  rotY: 0,          angle: Math.PI/6 },
+  { x: -30, z: -10, rotY: Math.PI/2,  angle: Math.PI/6 },
+  { x: 40,  z: -40, rotY: Math.PI/3,  angle: Math.PI/6 }
+];
+
+/* ============================================================
+   CREATE SCENE
+============================================================ */
 function createScene() {
   const scene = new BABYLON.Scene(engine);
   scene.clearColor = BABYLON.Color3.FromHexString(SETTINGS.skyColor);
-  scene.enablePhysics(new BABYLON.Vector3(0,-9.81,0), new BABYLON.CannonJSPlugin());
 
-  new BABYLON.HemisphericLight("hemi", new BABYLON.Vector3(0,1,0), scene);
+  new BABYLON.HemisphericLight("light", new BABYLON.Vector3(0,1,0), scene);
+  scene.enablePhysics(new BABYLON.Vector3(0, -9.81, 0), new BABYLON.CannonJSPlugin());
 
-  // Ground
-  const ground = BABYLON.MeshBuilder.CreateGround("ground",{width:300,height:300},scene);
-  const gMat = new BABYLON.StandardMaterial("gMat",scene);
-  gMat.diffuseColor = BABYLON.Color3.FromHexString(SETTINGS.groundColor);
-  ground.material = gMat;
-  ground.physicsImpostor = new BABYLON.PhysicsImpostor(ground,BABYLON.PhysicsImpostor.BoxImpostor,{mass:0,friction:2,restitution:0},scene);
+  /* ---------------- GROUND ---------------- */
+  const ground = BABYLON.MeshBuilder.CreateGround("ground", { width:300, height:300 }, scene);
+  const groundMat = new BABYLON.StandardMaterial("gMat", scene);
+  groundMat.diffuseColor = BABYLON.Color3.FromHexString(SETTINGS.groundColor);
+  ground.material = groundMat;
+  ground.physicsImpostor = new BABYLON.PhysicsImpostor(ground,BABYLON.PhysicsImpostor.BoxImpostor,{ mass:0, friction:2, restitution:0 },scene);
 
-  // Player Sphere
-  const sphere = BABYLON.MeshBuilder.CreateSphere("player",{diameter:2},scene);
+  /* ---------------- PLAYER SPHERE ---------------- */
+  const sphere = BABYLON.MeshBuilder.CreateSphere("player", { diameter:2 }, scene);
   sphere.position.set(0,3,0);
-  const sMat = new BABYLON.StandardMaterial("sMat",scene);
-  sMat.diffuseColor = BABYLON.Color3.Random();
-  sphere.material = sMat;
-  sphere.physicsImpostor = new BABYLON.PhysicsImpostor(sphere,BABYLON.PhysicsImpostor.SphereImpostor,{mass:1,friction:0.6,restitution:0.05},scene);
+  const sphereMat = new BABYLON.StandardMaterial("sphereMat", scene);
+  sphereMat.diffuseColor = BABYLON.Color3.Random();
+  sphere.material = sphereMat;
+  sphere.physicsImpostor = new BABYLON.PhysicsImpostor(sphere,BABYLON.PhysicsImpostor.SphereImpostor,{ mass:1, friction:0.6, restitution:0.05 },scene);
 
-  // Camera
-  const camera = new BABYLON.ArcRotateCamera("cam",0,BABYLON.Tools.ToRadians(55),15,sphere.position,scene);
+  /* ---------------- ARROWS ---------------- */
+  function makeArrow(name,color){
+    const a = BABYLON.MeshBuilder.CreatePlane(name,{size:1.2},scene);
+    const m = new BABYLON.StandardMaterial(name+"Mat",scene);
+    m.diffuseColor = BABYLON.Color3.FromHexString(color);
+    m.alpha = 0.9;
+    a.material = m;
+    a.billboardMode = BABYLON.Mesh.BILLBOARDMODE_ALL;
+    a.parent = sphere;
+    return a;
+  }
+
+  const arrows = {
+    forward: makeArrow("aF","#00FF00"),
+    back:    makeArrow("aB","#FF0000"),
+    left:    makeArrow("aL","#00A2FF"),
+    right:   makeArrow("aR","#FFD800")
+  };
+
+  arrows.forward.position.set(0,1.5,-2);
+  arrows.back.position.set(0,1.5,2);
+  arrows.left.position.set(-2,1.5,0);
+  arrows.right.position.set(2,1.5,0);
+
+  function updateArrows(i){
+    arrows.forward.material.emissiveColor = i.forward ? BABYLON.Color3.White() : BABYLON.Color3.Black();
+    arrows.back.material.emissiveColor    = i.back    ? BABYLON.Color3.White() : BABYLON.Color3.Black();
+    arrows.left.material.emissiveColor    = i.left    ? BABYLON.Color3.White() : BABYLON.Color3.Black();
+    arrows.right.material.emissiveColor   = i.right   ? BABYLON.Color3.White() : BABYLON.Color3.Black();
+  }
+
+  /* ---------------- RAMPS ---------------- */
+  for(const r of RAMPS){
+    const ramp = BABYLON.MeshBuilder.CreateBox("ramp",{width:12,depth:8,height:2},scene);
+    const m = new BABYLON.StandardMaterial("rm",scene);
+    m.diffuseColor = BABYLON.Color3.Random();
+    ramp.material = m;
+    ramp.position.set(r.x,1,r.z);
+    ramp.rotation.set(-r.angle, r.rotY, 0);
+    ramp.physicsImpostor = new BABYLON.PhysicsImpostor(ramp,BABYLON.PhysicsImpostor.BoxImpostor,{ mass:0, friction:1, restitution:0 },scene);
+  }
+
+  /* ---------------- CUBES ---------------- */
+  const cubes = [];
+  const sharedCoatTexture = new BABYLON.Texture(SETTINGS.coatTexture, scene);
+
+  function spawnCube(x,z,y){
+    const base = BABYLON.MeshBuilder.CreateBox("cube",{size:SETTINGS.cubeSize},scene);
+    const bMat = new BABYLON.StandardMaterial("bMat",scene);
+    bMat.diffuseColor = BABYLON.Color3.Random();
+    bMat.specularColor = BABYLON.Color3.Black();
+    base.material = bMat;
+
+    const coat = BABYLON.MeshBuilder.CreateBox("coat",{size:SETTINGS.coatSize},scene);
+    const cMat = new BABYLON.StandardMaterial("cMat",scene);
+    cMat.diffuseTexture = sharedCoatTexture;
+    cMat.diffuseTexture.hasAlpha = true;
+    cMat.useAlphaFromDiffuseTexture = true;
+    cMat.specularColor = BABYLON.Color3.Black();
+    coat.material = cMat;
+    coat.parent = base;
+
+    base.position.set(x,y,z);
+    base.physicsImpostor = new BABYLON.PhysicsImpostor(base,BABYLON.PhysicsImpostor.BoxImpostor,{ mass:1, friction:1, restitution:0.05 },scene);
+    cubes.push({mesh:base,x,y,z});
+  }
+
+  for(let i=0;i<SETTINGS.cubeCount;i++){
+    let x,z;
+    do {
+      x=(Math.random()-0.5)*260;
+      z=(Math.random()-0.5)*260;
+    } while(Math.hypot(x,z)<SETTINGS.safeRadius);
+    spawnCube(x,z, 8+Math.random()*12);
+  }
+
+  /* ---------------- CAMERA ---------------- */
+  const camera = new BABYLON.ArcRotateCamera("cam",0,BABYLON.Tools.ToRadians(55),18,sphere.position.clone(),scene);
   camera.attachControl(canvas,true);
   camera.lowerRadiusLimit = 6;
   camera.upperRadiusLimit = 40;
   camera.wheelDeltaPercentage = 0.01;
 
-  let manualCam=false, lastManual=0;
-  const CAM_TIMEOUT=1500;
+  let manualCam=false,lastManual=0;
+  const CAM_TIMEOUT = 1500;
+  const angleDisplay = document.getElementById("angleDisplay");
+
   window.addEventListener("keydown",e=>{
     if(e.key.startsWith("Arrow")){
       manualCam=true; lastManual=performance.now();
@@ -79,7 +175,7 @@ function createScene() {
     }
   });
 
-  // Input
+  /* ---------------- INPUT ---------------- */
   const input={forward:false,back:false,left:false,right:false,jump:false};
   window.addEventListener("keydown",e=>{
     const k=e.key.toLowerCase();
@@ -98,52 +194,75 @@ function createScene() {
     if(e.key===" ")input.jump=false;
   });
 
-  // Utilities
-  const rayDown = new BABYLON.Vector3(0,-1,0);
-  const grounded=()=>{ const r=new BABYLON.Ray(sphere.position,rayDown,1.15); const hit=scene.pickWithRay(r,m=>m!==sphere); return hit&&hit.hit; };
-  const clampVel=v=>{ const h=new BABYLON.Vector3(v.x,0,v.z); const l=h.length(); if(l>SETTINGS.maxSpeed){h.scaleInPlace(SETTINGS.maxSpeed/l); return new BABYLON.Vector3(h.x,v.y,h.z);} return v; };
-  let lastMove = new BABYLON.Vector3(0,0,1);
-
-  const angleDisplay = document.getElementById("angleDisplay");
-
   /* ---------------- GAME LOOP ---------------- */
+  let lastMove = new BABYLON.Vector3(0,0,1);
+  const rayDown = new BABYLON.Vector3(0,-1,0);
+
+  const grounded = () => {
+    const ray = new BABYLON.Ray(sphere.position, rayDown, 1.15);
+    const hit = scene.pickWithRay(ray, m=>m!==sphere);
+    return hit && hit.hit;
+  };
+
+  const clampVel = v=>{
+    const h = new BABYLON.Vector3(v.x,0,v.z);
+    const l = h.length();
+    if(l>SETTINGS.maxSpeed){ h.scaleInPlace(SETTINGS.maxSpeed/l); return new BABYLON.Vector3(h.x,v.y,h.z);}
+    return v;
+  };
+
   scene.registerBeforeRender(()=>{
-    // Expire manual camera rotation
-    if(manualCam && performance.now()-lastManual>CAM_TIMEOUT) manualCam=false;
+    updateArrows(input);
 
-    // Camera-relative movement
-    const camDir = new BABYLON.Vector3(Math.sin(camera.alpha+Math.PI),0,Math.cos(camera.alpha+Math.PI));
-    const rightDir = new BABYLON.Vector3(camDir.z,0,-camDir.x);
+    if(manualCam && performance.now()-lastManual > CAM_TIMEOUT) manualCam=false;
 
-    let moveDir = BABYLON.Vector3.Zero();
-    if(input.forward) moveDir.addInPlace(camDir);
-    if(input.back) moveDir.subtractInPlace(camDir);
-    if(input.left) moveDir.subtractInPlace(rightDir);
-    if(input.right) moveDir.addInPlace(rightDir);
+    const forward = new BABYLON.Vector3(Math.sin(camera.alpha+Math.PI),0,Math.cos(camera.alpha+Math.PI));
+    const right   = new BABYLON.Vector3(forward.z,0,-forward.x);
 
-    if(moveDir.lengthSquared()>0.001){
-      moveDir.normalize();
-      lastMove.copyFrom(moveDir);
+    let dir = BABYLON.Vector3.Zero();
+    if(input.forward) dir.addInPlace(forward);
+    if(input.back)    dir.subtractInPlace(forward);
+    if(input.left)    dir.subtractInPlace(right);
+    if(input.right)   dir.addInPlace(right);
+
+    if(dir.lengthSquared()>0.001){
+      dir.normalize();
+      lastMove.copyFrom(dir);
     }
 
     const v = sphere.physicsImpostor.getLinearVelocity();
-    const damped = new BABYLON.Vector3(v.x*SETTINGS.damp,v.y,v.z*SETTINGS.damp);
-    if(moveDir.length()>0.001) sphere.physicsImpostor.setLinearVelocity(clampVel(damped.add(moveDir.scale(SETTINGS.moveForce*engine.getDeltaTime()*0.06))));
-    else sphere.physicsImpostor.setLinearVelocity(new BABYLON.Vector3(damped.x,v.y,damped.z));
+    const damped = new BABYLON.Vector3(v.x*SETTINGS.damp, v.y, v.z*SETTINGS.damp);
 
-    if(input.jump && grounded()) sphere.physicsImpostor.setLinearVelocity(new BABYLON.Vector3(v.x,SETTINGS.jumpForce,v.z));
+    if(dir.length()>0.001){
+      sphere.physicsImpostor.setLinearVelocity(
+        clampVel(damped.add(dir.scale(SETTINGS.moveForce * engine.getDeltaTime()*0.06)))
+      );
+    } else {
+      sphere.physicsImpostor.setLinearVelocity(new BABYLON.Vector3(damped.x,v.y,damped.z));
+    }
 
-    if(sphere.position.y<SETTINGS.respawnY){
+    if(input.jump && grounded()){
+      sphere.physicsImpostor.setLinearVelocity(new BABYLON.Vector3(v.x,SETTINGS.jumpForce,v.z));
+    }
+
+    if(sphere.position.y < SETTINGS.respawnY){
       sphere.position.set(0,6,0);
       sphere.physicsImpostor.setLinearVelocity(BABYLON.Vector3.Zero());
     }
 
-    // Auto camera follow
+    for(const c of cubes){
+      if(c.mesh.position.y < SETTINGS.respawnY){
+        c.mesh.position.set(c.x, c.y, c.z);
+        c.mesh.physicsImpostor.setLinearVelocity(BABYLON.Vector3.Zero());
+        c.mesh.physicsImpostor.setAngularVelocity(BABYLON.Vector3.Zero());
+      }
+    }
+
     if(!manualCam){
       const desired = Math.atan2(lastMove.x,lastMove.z);
-      camera.alpha = BABYLON.Scalar.Lerp(camera.alpha,desired,0.18);
+      camera.alpha = BABYLON.Scalar.Lerp(camera.alpha, desired, 0.18);
     }
-    camera.target = BABYLON.Vector3.Lerp(camera.target,sphere.position,0.28);
+    camera.target = BABYLON.Vector3.Lerp(camera.target, sphere.position, 0.28);
 
     // Update camera angle display
     let angleDeg = (camera.alpha*180/Math.PI)%360;
@@ -154,10 +273,12 @@ function createScene() {
   return scene;
 }
 
-/* ---------------- RUN ---------------- */
+/* ============================================================
+   START ENGINE
+============================================================ */
 const scene = createScene();
-engine.runRenderLoop(()=>scene.render());
-window.addEventListener("resize",()=>engine.resize());
+engine.runRenderLoop(() => scene.render());
+window.addEventListener("resize", () => engine.resize());
 </script>
 </body>
 </html>
