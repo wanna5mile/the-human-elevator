@@ -95,21 +95,15 @@ const createScene = () => {
 
   function spawnCube(x,z,y=8){
     const c = BABYLON.MeshBuilder.CreateBox("cube",{size:2},scene);
-// Random color + transparent overlay texture
-const cm = new BABYLON.StandardMaterial("cubeMat", scene);
 
-// Base random color (shows behind your PNG)
-cm.diffuseColor = BABYLON.Color3.Random();
-
-// Overlay PNG (transparent parts let the random color show)
-cm.diffuseTexture = new BABYLON.Texture("box-texture.png", scene);
-cm.diffuseTexture.hasAlpha = true;
-cm.useAlphaFromDiffuseTexture = true;
-
-// Disable glossy shine
-cm.specularColor = BABYLON.Color3.Black();
-
-c.material = cm;
+    // Random color + transparent overlay texture
+    const cm = new BABYLON.StandardMaterial("cubeMat", scene);
+    cm.diffuseColor = BABYLON.Color3.Random();  // base color
+    cm.diffuseTexture = new BABYLON.Texture("box-texture.png", scene);
+    cm.diffuseTexture.hasAlpha = true;
+    cm.useAlphaFromDiffuseTexture = true;
+    cm.specularColor = BABYLON.Color3.Black();
+    c.material = cm;
 
     c.position.set(x,y,z);
 
@@ -231,7 +225,7 @@ c.material = cm;
     /* ---- Corrected camera-relative movement ---- */
     const camAlpha = camera.alpha;
 
-    // Forward now points where camera is facing
+    // Correct forward so pressing W moves AWAY from camera
     const forward = new BABYLON.Vector3(
       Math.sin(camAlpha + Math.PI),
       0,
