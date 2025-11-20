@@ -65,7 +65,13 @@ function makeTriWedge(scene, name, width = 10, height = 6, depth = 8, pos = {x:0
   ramp.position.set(pos.x, pos.y + height/2, pos.z);
   ramp.rotation.y = rotY;
 
-  ramp.material = createBoxMaterial(scene, "#A6A6A6");
+  // MultiMaterial for full lighting on all sides
+  const topMat = createBoxMaterial(scene, "#A6A6A6");
+  const sideMat = createBoxMaterial(scene, "#A6A6A6");
+  const mm = new BABYLON.MultiMaterial(name + "_MM", scene);
+  mm.subMaterials = [sideMat, sideMat, sideMat, sideMat, topMat, sideMat];
+  ramp.material = mm;
+
   ramp.physicsImpostor = new BABYLON.PhysicsImpostor(ramp, BABYLON.PhysicsImpostor.MeshImpostor, { mass:0, friction:1, restitution:0 }, scene);
   ramp.receiveShadows = true;
   ramp.isPickable = false;
@@ -117,9 +123,9 @@ function createScene() {
   water.position.y = WATER_SURFACE_Y;
   const waterMat = new BABYLON.WaterMaterial("waterMat", scene);
   waterMat.bumpTexture = new BABYLON.Texture("https://cdn.babylonjs.com/textures/waterbump.png", scene);
-  waterMat.windForce = -5; waterMat.waveHeight=0.5; waterMat.waveLength=0.1;
-  waterMat.waterColor = color3(SETTINGS.waterColor); waterMat.colorBlendFactor=0.3;
-  waterMat.addToRenderList(ground);
+  waterMat.windForce = -2; waterMat.waveHeight = 0.3; waterMat.waveLength = 0.1;
+  waterMat.waterColor = color3(SETTINGS.waterColor);
+  waterMat.colorBlendFactor = 0.3;
   water.material = waterMat;
 
   const waterVol = BABYLON.MeshBuilder.CreateBox("waterVol", {width:700, height:WATER_DEPTH, depth:700}, scene);
@@ -147,7 +153,7 @@ function createScene() {
   });
 
   /* ---------------- TREES ---------------- */
-  scatterObjects(scene, SETTINGS.treeCount, (x,z,objs)=>{
+  const trees = scatterObjects(scene, SETTINGS.treeCount, (x,z,objs)=>{
     return !objs.some(o=>Math.hypot(o.position.x - x, o.position.z - z)<4) &&
            !ramps.some(r=>Math.hypot(r.position.x-x,r.position.z-z)<10);
   }, (x,z,id)=>{
@@ -164,16 +170,21 @@ function createScene() {
 
   /* ---------------- CUBES ---------------- */
   const coatTex = SETTINGS.coatTexture ? new BABYLON.Texture(SETTINGS.coatTexture, scene) : null;
-  scatterObjects(scene, SETTINGS.cubeCount, (x,z,objs)=>{
+  const cubes = scatterObjects(scene, SETTINGS.cubeCount, (x,z,objs)=>{
     return !objs.some(o=>Math.hypot(o.position.x-x,o.position.z-z)<3) &&
            !ramps.some(r=>Math.hypot(r.position.x-x,r.position.z-z)<8);
   }, (x,z,id)=>{
     const cube = BABYLON.MeshBuilder.CreateBox(`cube${id}`, {size:SETTINGS.cubeSize}, scene);
     cube.position.set(x, SETTINGS.cubeSize/2+0.1, z);
-    const mat = new BABYLON.StandardMaterial(`cubeMat${id}`, scene);
-    if (coatTex) mat.diffuseTexture = coatTex.clone();
-    else mat.diffuseColor = BABYLON.Color3.Random();
-    cube.material = mat;
+
+    // MultiMaterial: top green, sides same as coat or random
+    const topMat = createBoxMaterial(scene, SETTINGS.groundTopColor);
+    const sideMat = coatTex ? new BABYLON.StandardMaterial(`sideMat${id}`, scene) : createBoxMaterial(scene, BABYLON.Color3.Random());
+    if (coatTex) sideMat.diffuseTexture = coatTex.clone();
+    const mm = new BABYLON.MultiMaterial(`cubeMM${id}`, scene);
+    mm.subMaterials = [sideMat, sideMat, sideMat, sideMat, topMat, sideMat];
+    cube.material = mm;
+
     cube.physicsImpostor = new BABYLON.PhysicsImpostor(cube, BABYLON.PhysicsImpostor.BoxImpostor, {mass:1, friction:1}, scene);
     return cube;
   });
@@ -181,6 +192,13 @@ function createScene() {
   /* ---------------- CAMERA ---------------- */
   const camera = new BABYLON.ArcRotateCamera("cam", Math.PI/2, Math.PI/3, 60, BABYLON.Vector3.Zero(), scene);
   camera.attachControl(canvas,true);
+
+  /* ---------------- WATER REFLECTION ---------------- */
+  // Add all objects to water render list
+  waterMat.addToRenderList(ground);
+  ramps.forEach(r => waterMat.addToRenderList(r));
+  cubes.forEach(c => waterMat.addToRenderList(c));
+  trees.forEach(t => waterMat.addToRenderList(t));
 
   /* ---------------- DAY/NIGHT & WATER ANIMATION ---------------- */
   scene.registerBeforeRender(()=>{
