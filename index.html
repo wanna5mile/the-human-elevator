@@ -109,30 +109,33 @@ const createScene = () => {
     cubes.push({mesh:c, spawnX:x, spawnY:y, spawnZ:z});
   }
 
-  // initial cube placement
   for (let i=0; i<CUBE_COUNT; i++) {
     let x,z;
     do {
       x = (Math.random()-0.5) * 260;
       z = (Math.random()-0.5) * 260;
-    } while (Math.hypot(x-0, z-0) < SAFE_RADIUS);
+    } while (Math.hypot(x, z) < SAFE_RADIUS);
 
     spawnCube(x,z, 8 + Math.random()*12);
   }
 
   /* --------- Camera --------- */
-  const camera = new BABYLON.ArcRotateCamera("cam",
-    0, BABYLON.Tools.ToRadians(55), 18,
+  const camera = new BABYLON.ArcRotateCamera(
+    "cam",
+    0,
+    BABYLON.Tools.ToRadians(55),
+    18,
     sphere.position.clone(),
     scene
   );
+
   camera.attachControl(canvas, true);
   camera.lowerRadiusLimit = 6;
   camera.upperRadiusLimit = 40;
   camera.wheelDeltaPercentage = 0.01;
 
   /* --------- Input --------- */
-  const input = {forward:false, back:false, left:false, right:false, jump:false};
+  const input = { forward:false, back:false, left:false, right:false, jump:false };
 
   window.addEventListener("keydown", e=>{
     const k = e.key.toLowerCase();
@@ -156,7 +159,6 @@ const createScene = () => {
   let manualCamera = false;
   let lastManual = 0;
   const MANUAL_TIMEOUT = 1500;
-
   const ROT_SPEED = 0.03;
 
   window.addEventListener("keydown", e=>{
@@ -206,26 +208,37 @@ const createScene = () => {
     return pick && pick.hit;
   }
 
-  /* --------- GAME LOOP --------- */
+  /* ---------------- GAME LOOP ---------------- */
   scene.registerBeforeRender(()=>{
 
-    // camera manual override expiration
-    if(manualCamera && performance.now()-lastManual > MANUAL_TIMEOUT){
+    // Expire manual camera rotation
+    if(manualCamera && performance.now() - lastManual > MANUAL_TIMEOUT){
       manualCamera = false;
     }
 
-    // camera-relative movement basis
+    /* ---- Corrected camera-relative movement ---- */
     const camAlpha = camera.alpha;
-    const forward = new BABYLON.Vector3(Math.sin(camAlpha),0,Math.cos(camAlpha));
-    const right   = new BABYLON.Vector3(forward.z*-1,0,forward.x);
+
+    // Forward now points where camera is facing
+    const forward = new BABYLON.Vector3(
+      Math.sin(camAlpha + Math.PI),
+      0,
+      Math.cos(camAlpha + Math.PI)
+    );
+
+    const right = new BABYLON.Vector3(
+      forward.z,
+      0,
+      -forward.x
+    );
 
     let dir = new BABYLON.Vector3(0,0,0);
-    if(input.forward) dir.addInPlace(forward);
-    if(input.back)    dir.subtractInPlace(forward);
-    if(input.left)    dir.subtractInPlace(right);
-    if(input.right)   dir.addInPlace(right);
+    if (input.forward) dir.addInPlace(forward);
+    if (input.back)    dir.subtractInPlace(forward);
+    if (input.left)    dir.subtractInPlace(right);
+    if (input.right)   dir.addInPlace(right);
 
-    if(dir.lengthSquared()>0.001){
+    if (dir.lengthSquared() > 0.001) {
       dir.normalize();
       lastMoveDir = dir.clone();
     }
@@ -233,51 +246,54 @@ const createScene = () => {
     const v = sphere.physicsImpostor.getLinearVelocity();
     const damped = new BABYLON.Vector3(v.x*DAMP, v.y, v.z*DAMP);
 
-    // apply movement
-    if(dir.length()>0.001){
+    // Apply movement
+    if (dir.length() > 0.001) {
       const desired = damped.add(dir.scale(MOVE_FORCE * engine.getDeltaTime()*0.06));
       sphere.physicsImpostor.setLinearVelocity(clampVel(desired));
     } else {
-      sphere.physicsImpostor.setLinearVelocity(new BABYLON.Vector3(damped.x, v.y, damped.z));
+      sphere.physicsImpostor.setLinearVelocity(
+        new BABYLON.Vector3(damped.x, v.y, damped.z)
+      );
     }
 
-    // jump
-    if(input.jump && grounded()){
+    // Jump
+    if (input.jump && grounded()) {
       sphere.physicsImpostor.setLinearVelocity(new BABYLON.Vector3(v.x, JUMP_FORCE, v.z));
     }
 
-    // sphere respawn
-    if(sphere.position.y < RESPAWN_Y){
+    // Respawn sphere
+    if (sphere.position.y < RESPAWN_Y) {
       sphere.position.set(0,6,0);
       sphere.physicsImpostor.setLinearVelocity(BABYLON.Vector3.Zero());
     }
 
-    // cubes respawn
-    for(const c of cubes){
-      if(c.mesh.position.y < RESPAWN_Y){
+    // Respawn cubes
+    for (const c of cubes) {
+      if (c.mesh.position.y < RESPAWN_Y) {
         c.mesh.position.set(c.spawnX, c.spawnY, c.spawnZ);
         c.mesh.physicsImpostor.setLinearVelocity(BABYLON.Vector3.Zero());
         c.mesh.physicsImpostor.setAngularVelocity(BABYLON.Vector3.Zero());
       }
     }
 
-    // camera auto-follow rotation
-    if(!manualCamera && lastMoveDir.length()>0.001){
-      const desired = Math.atan2(lastMoveDir.x, lastMoveDir.z) + Math.PI;
-      camera.alpha = BABYLON.Scalar.Lerp(camera.alpha, desired, 0.08);
+    /* ---- Faster, smoother camera auto-rotate ---- */
+    if (!manualCamera && lastMoveDir.length() > 0.001) {
+      const desired = Math.atan2(lastMoveDir.x, lastMoveDir.z);
+      camera.alpha = BABYLON.Scalar.Lerp(camera.alpha, desired, 0.18);
     }
 
-    // camera follows position smoothly
-    camera.target = BABYLON.Vector3.Lerp(camera.target, sphere.position, 0.12);
+    /* ---- Tighter camera follow ---- */
+    camera.target = BABYLON.Vector3.Lerp(camera.target, sphere.position, 0.28);
 
-  }); // end loop
+  }); // END LOOP
 
   return scene;
 };
 
+/* ---------------- RUN SCENE ---------------- */
 const scene = createScene();
-engine.runRenderLoop(()=>scene.render());
-window.addEventListener("resize",()=>engine.resize());
+engine.runRenderLoop(() => scene.render());
+window.addEventListener("resize", () => engine.resize());
 </script>
 </body>
 </html>
