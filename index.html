@@ -50,7 +50,12 @@ function createScene() {
   const gMat = new BABYLON.StandardMaterial("gMat",scene);
   gMat.diffuseColor = BABYLON.Color3.FromHexString(SETTINGS.groundColor);
   ground.material = gMat;
-  ground.physicsImpostor = new BABYLON.PhysicsImpostor(ground,BABYLON.PhysicsImpostor.BoxImpostor,{mass:0,friction:2,restitution:0},scene);
+  ground.physicsImpostor = new BABYLON.PhysicsImpostor(
+    ground,
+    BABYLON.PhysicsImpostor.BoxImpostor,
+    {mass:0,friction:2,restitution:0},
+    scene
+  );
 
   // Player sphere
   const sphere = BABYLON.MeshBuilder.CreateSphere("player",{diameter:2},scene);
@@ -58,12 +63,18 @@ function createScene() {
   const sMat = new BABYLON.StandardMaterial("sMat",scene);
   sMat.diffuseColor = BABYLON.Color3.Random();
   sphere.material = sMat;
-  sphere.physicsImpostor = new BABYLON.PhysicsImpostor(sphere,BABYLON.PhysicsImpostor.SphereImpostor,{mass:1,friction:0.6,restitution:0.05},scene);
+  sphere.physicsImpostor = new BABYLON.PhysicsImpostor(
+    sphere,
+    BABYLON.PhysicsImpostor.SphereImpostor,
+    {mass:1,friction:0.6,restitution:0.05},
+    scene
+  );
 
   // Camera
   const camera = new BABYLON.ArcRotateCamera("cam",0,BABYLON.Tools.ToRadians(55),18,sphere.position.clone(),scene);
   camera.attachControl(canvas,true);
-  camera.lowerRadiusLimit=6; camera.upperRadiusLimit=40;
+  camera.lowerRadiusLimit=6;
+  camera.upperRadiusLimit=40;
   camera.wheelDeltaPercentage=0.01;
 
   const input = {forward:false,jump:false};
@@ -94,20 +105,23 @@ function createScene() {
   };
 
   scene.registerBeforeRender(()=>{
-    // Move towards camera forward
+    // Move forward relative to camera
     if(input.forward){
-      // camera's forward direction in XZ plane
+      // Correct camera forward in XZ plane
       const forward = new BABYLON.Vector3(
-        Math.sin(camera.alpha + Math.PI),
-        0,
-        Math.cos(camera.alpha + Math.PI)
+        -Math.sin(camera.alpha), 
+        0, 
+        -Math.cos(camera.alpha)
       );
+      forward.normalize();
       const impulse = forward.scale(SETTINGS.moveForce * engine.getDeltaTime()*0.03);
       sphere.physicsImpostor.applyImpulse(impulse, sphere.getAbsolutePosition());
     } else {
-      // damping when no input
+      // Apply damping when no input
       const v = sphere.physicsImpostor.getLinearVelocity();
-      sphere.physicsImpostor.setLinearVelocity(new BABYLON.Vector3(v.x*SETTINGS.damp,v.y,v.z*SETTINGS.damp));
+      sphere.physicsImpostor.setLinearVelocity(
+        new BABYLON.Vector3(v.x*SETTINGS.damp, v.y, v.z*SETTINGS.damp)
+      );
     }
 
     // Jump
@@ -124,9 +138,10 @@ function createScene() {
       sphere.physicsImpostor.setLinearVelocity(BABYLON.Vector3.Zero());
     }
 
-    // Camera follows the sphere
+    // Camera follows the sphere smoothly
     camera.target = BABYLON.Vector3.Lerp(camera.target, sphere.position,0.28);
 
+    // Display camera alpha angle
     let angleDeg = (camera.alpha*180/Math.PI)%360;
     if(angleDeg<0) angleDeg+=360;
     document.getElementById("angleDisplay").textContent = "Angle: "+angleDeg.toFixed(0)+"°";
