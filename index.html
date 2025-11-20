@@ -1,156 +1,149 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <meta charset="UTF-8">
-    <title>Babylon Player Updated</title>
+    <meta charset="utf-8">
+    <title>Babylon Player Demo</title>
     <style>
-        html, body {
-            width: 100%;
-            height: 100%;
-            margin: 0;
-            overflow: hidden;
-        }
-
-        #renderCanvas {
-            width: 100%;
-            height: 100%;
-            touch-action: none;
-        }
+        html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+        #renderCanvas { width: 100%; height: 100%; touch-action: none; }
     </style>
+    <script src="https://cdn.babylonjs.com/babylon.js"></script>
 </head>
 <body>
-
 <canvas id="renderCanvas"></canvas>
-
-<script src="https://cdn.babylonjs.com/babylon.js"></script>
 
 <script>
 const canvas = document.getElementById("renderCanvas");
 const engine = new BABYLON.Engine(canvas, true);
 
-const createScene = function () {
+const createScene = () => {
     const scene = new BABYLON.Scene(engine);
 
-    // Set sky color
-    scene.clearColor = new BABYLON.Color3.FromHexString("#9DE9FF");
-
-    // Physics
-    scene.enablePhysics(new BABYLON.Vector3(0, -9.81, 0));
-
-    // Camera (free camera with mouse drag)
-    const camera = new BABYLON.ArcRotateCamera(
-        "cam",
-        Math.PI / 2,
-        Math.PI / 3,
-        20,
-        new BABYLON.Vector3(0, 1, 0),
+    // ----- CAMERA -----
+    const camera = new BABYLON.ArcRotateCamera("camera",
+        Math.PI / 2, Math.PI / 3, 25,
+        new BABYLON.Vector3(0, 2, 0),
         scene
     );
     camera.attachControl(canvas, true);
 
-    // Light
-    new BABYLON.HemisphericLight("light", new BABYLON.Vector3(0, 1, 0), scene);
+    // Arrow keys rotate camera
+    const cameraRotationSpeed = 0.03;
+    window.addEventListener("keydown", (e) => {
+        if (e.key === "ArrowLeft")  camera.alpha -= cameraRotationSpeed;
+        if (e.key === "ArrowRight") camera.alpha += cameraRotationSpeed;
+        if (e.key === "ArrowUp")    camera.beta -= cameraRotationSpeed;
+        if (e.key === "ArrowDown")  camera.beta += cameraRotationSpeed;
+    });
 
-    // Player (Sphere) with random color
-    const player = BABYLON.MeshBuilder.CreateSphere("player", { diameter: 2 });
-    player.position.y = 2;
+    // ----- LIGHT -----
+    new BABYLON.HemisphericLight("light", new BABYLON.Vector3(1, 1, 0), scene);
 
+    // ----- SKY COLOR -----
+    scene.clearColor = BABYLON.Color3.FromHexString("#9DE9FF");
+
+    // ----- GROUND -----
+    const ground = BABYLON.MeshBuilder.CreateGround("ground", { width: 200, height: 200 }, scene);
+    const groundMat = new BABYLON.StandardMaterial("groundMat", scene);
+    groundMat.diffuseColor = BABYLON.Color3.FromHexString("#33FF4B");
+    ground.material = groundMat;
+    ground.checkCollisions = true;
+
+    // ----- ENABLE PHYSICS -----
+    const gravityVector = new BABYLON.Vector3(0, -9.81, 0);
+    const physicsPlugin = new BABYLON.CannonJSPlugin();
+    scene.enablePhysics(gravityVector, physicsPlugin);
+
+    // ----- PLAYER SPHERE -----
+    const sphere = BABYLON.MeshBuilder.CreateSphere("player", { diameter: 2 }, scene);
+    sphere.position.y = 5;
+
+    const randomColor = () => new BABYLON.Color3(Math.random(), Math.random(), Math.random());
     const sphereMat = new BABYLON.StandardMaterial("sphereMat", scene);
-    sphereMat.diffuseColor = new BABYLON.Color3(Math.random(), Math.random(), Math.random());
-    player.material = sphereMat;
+    sphereMat.diffuseColor = randomColor();
+    sphere.material = sphereMat;
 
-    player.physicsImpostor = new BABYLON.PhysicsImpostor(
-        player,
-        BABYLON.PhysicsImpostor.SphereImpostor,
-        { mass: 1, friction: 0.5, restitution: 0.1 },
-        scene
+    sphere.physicsImpostor = new BABYLON.PhysicsImpostor(
+        sphere, BABYLON.PhysicsImpostor.SphereImpostor, { mass: 1, friction: 0.5, restitution: 0.2 }
     );
 
-    // Ground (light green)
-    const ground = BABYLON.MeshBuilder.CreateGround("ground", { width: 60, height: 60 });
-    const groundMaterial = new BABYLON.StandardMaterial("groundMat", scene);
-    groundMaterial.diffuseColor = BABYLON.Color3.FromHexString("#33FF4B");
-    ground.material = groundMaterial;
+    // ----- PLAYER MOVEMENT -----
+    const input = { w: false, a: false, s: false, d: false };
+    const speed = 0.2;
+    let canJump = true;
 
-    ground.physicsImpostor = new BABYLON.PhysicsImpostor(
-        ground,
-        BABYLON.PhysicsImpostor.BoxImpostor,
-        { mass: 0 }
-    );
+    window.addEventListener("keydown", (e) => {
+        if (e.key.toLowerCase() in input) input[e.key.toLowerCase()] = true;
 
-    // Spawn cubes (random color, avoid player)
-    const SAFE_RADIUS = 8;
+        if (e.key === " " && canJump) {
+            sphere.physicsImpostor.setLinearVelocity(new BABYLON.Vector3(0, 6, 0));
+            canJump = false;
+        }
+    });
 
-    for (let i = 0; i < 20; i++) {
+    window.addEventListener("keyup", (e) => {
+        if (e.key.toLowerCase() in input) input[e.key.toLowerCase()] = false;
+    });
+
+    scene.onBeforeRenderObservable.add(() => {
+        const vel = sphere.physicsImpostor.getLinearVelocity();
+        let moveX = 0;
+        let moveZ = 0;
+
+        if (input.w) moveZ += speed;
+        if (input.s) moveZ -= speed;
+        if (input.a) moveX -= speed;
+        if (input.d) moveX += speed;
+
+        sphere.physicsImpostor.setLinearVelocity(
+            new BABYLON.Vector3(vel.x + moveX, vel.y, vel.z + moveZ)
+        );
+
+        // Check for respawn
+        if (sphere.position.y < -20) {
+            sphere.position.set(0, 10, 0);
+            sphere.physicsImpostor.setLinearVelocity(new BABYLON.Vector3(0, 0, 0));
+        }
+    });
+
+    // Detect landing (reset jump)
+    sphere.physicsImpostor.registerOnPhysicsCollide(ground.physicsImpostor, () => {
+        canJump = true;
+    });
+
+    // ----- RANDOM CUBES -----
+    function spawnCube() {
+        const safeRadius = 5; // avoid player
         let x, z;
+
         do {
-            x = Math.random() * 50 - 25;
-            z = Math.random() * 50 - 25;
-        } while (Math.sqrt(x*x + z*z) < SAFE_RADIUS);
+            x = (Math.random() - 0.5) * 150;
+            z = (Math.random() - 0.5) * 150;
+        } while (Math.sqrt(x * x + z * z) < safeRadius);
 
-        const box = BABYLON.MeshBuilder.CreateBox("box" + i, { size: 2 });
-        box.position.set(x, 1, z);
+        const cube = BABYLON.MeshBuilder.CreateBox("cube", { size: 2 }, scene);
+        cube.position = new BABYLON.Vector3(x, 10, z);
 
-        const boxMat = new BABYLON.StandardMaterial("boxMat" + i, scene);
-        boxMat.diffuseColor = new BABYLON.Color3(Math.random(), Math.random(), Math.random());
-        box.material = boxMat;
+        const mat = new BABYLON.StandardMaterial("cubeMat", scene);
+        mat.diffuseColor = randomColor();
+        cube.material = mat;
 
-        box.physicsImpostor = new BABYLON.PhysicsImpostor(
-            box,
-            BABYLON.PhysicsImpostor.BoxImpostor,
-            { mass: 0, friction: 1 }
+        cube.physicsImpostor = new BABYLON.PhysicsImpostor(
+            cube, BABYLON.PhysicsImpostor.BoxImpostor, { mass: 1, friction: 1, restitution: 0.1 }
         );
     }
 
-    // Input tracking
-    const input = {
-        forward: false,
-        backward: false,
-        left: false,
-        right: false,
-        jump: false
-    };
-
-    window.addEventListener("keydown", e => {
-        if (e.key === "w" || e.key === "ArrowUp") input.forward = true;
-        if (e.key === "s" || e.key === "ArrowDown") input.backward = true;
-        if (e.key === "a" || e.key === "ArrowLeft") input.left = true;
-        if (e.key === "d" || e.key === "ArrowRight") input.right = true;
-        if (e.key === " ") input.jump = true;
-    });
-
-    window.addEventListener("keyup", e => {
-        if (e.key === "w" || e.key === "ArrowUp") input.forward = false;
-        if (e.key === "s" || e.key === "ArrowDown") input.backward = false;
-        if (e.key === "a" || e.key === "ArrowLeft") input.left = false;
-        if (e.key === "d" || e.key === "ArrowRight") input.right = false;
-        if (e.key === " ") input.jump = false;
-    });
-
-    // Movement system
-    scene.onBeforeRenderObservable.add(() => {
-        const speed = 0.5;
-        const jumpForce = 8;
-        const pos = player.getAbsolutePosition();
-
-        if (input.forward)  player.physicsImpostor.applyImpulse(new BABYLON.Vector3(0, 0, -speed), pos);
-        if (input.backward) player.physicsImpostor.applyImpulse(new BABYLON.Vector3(0, 0, speed), pos);
-        if (input.left)     player.physicsImpostor.applyImpulse(new BABYLON.Vector3(-speed, 0, 0), pos);
-        if (input.right)    player.physicsImpostor.applyImpulse(new BABYLON.Vector3(speed, 0, 0), pos);
-
-        // jump when close to ground
-        if (input.jump && player.position.y <= 2.1) {
-            player.physicsImpostor.applyImpulse(new BABYLON.Vector3(0, jumpForce, 0), pos);
-        }
-    });
+    // Spawn a bunch of cubes
+    for (let i = 0; i < 25; i++) spawnCube();
 
     return scene;
 };
 
 const scene = createScene();
 engine.runRenderLoop(() => scene.render());
+
+// Resize if window changes size
 window.addEventListener("resize", () => engine.resize());
 </script>
-
 </body>
 </html>
