@@ -75,7 +75,7 @@ const SETTINGS = {
   dayNightCycleMs: 5 * 60 * 1000,
 
   coatTexture: "box-texture.png",
-  coatSize: 2.04
+  coatSize: 1.0   // <- changed to 1x1 per request
 };
 
 function rndRange(min,max){ return Math.random()*(max-min)+min; }
@@ -83,6 +83,7 @@ function color3(hex){ return BABYLON.Color3.FromHexString(hex); }
 
 /* ============================================================
    TRIANGULAR RAMP
+   (kept using fixed positions instead of random)
 ============================================================ */
 function makeTriRamp(scene, nameSuffix="") {
   const shape = [
@@ -100,7 +101,7 @@ function makeTriRamp(scene, nameSuffix="") {
 
   ramp.rotation.x = -Math.atan2(depth, 6);
   const m = new BABYLON.StandardMaterial("rampMat"+nameSuffix, scene);
-  m.diffuseColor = BABYLON.Color3.Random();
+  m.diffuseColor = new BABYLON.Color3(0.6,0.6,0.6);
   ramp.material = m;
 
   ramp.physicsImpostor = new BABYLON.PhysicsImpostor(
@@ -137,6 +138,7 @@ function createScene(){
     { width: groundSize, height: groundSize, subdivisions: 4 },
     scene
   );
+  // ground top color
   groundVis.material = new BABYLON.StandardMaterial("gMat", scene);
   groundVis.material.diffuseColor = color3(SETTINGS.groundTopColor);
 
@@ -164,6 +166,7 @@ function createScene(){
   waterMat.addToRenderList(groundVis);
 
   /* ---------------- RAMPS ---------------- */
+  // keep ramps at fixed, deterministic positions
   const RAMPS = [
     { x: 20,  z: 20,  rotY: 0 },
     { x: -30, z: -10, rotY: Math.PI/2 },
@@ -203,91 +206,136 @@ function createScene(){
   }
 
   /* ---------------- TREES ---------------- */
+  // deterministic grid placement for trees (fixed)
   const trees = [];
-  for(let i=0;i<SETTINGS.treeCount;i++){
-    const x = rndRange(-groundSize/2 + 8, groundSize/2 - 8);
-    const z = rndRange(-groundSize/2 + 8, groundSize/2 - 8);
+  (function placeTrees(){
+    const count = SETTINGS.treeCount;
+    const cols = Math.ceil(Math.sqrt(count));
+    const spacing = 12;
+    let ix = 0;
+    for(let r=0;r<cols && ix<count;r++){
+      for(let c=0;c<cols && ix<count;c++){
+        const x = -cols/2*spacing + c*spacing + 6; // offset a bit
+        const z = -cols/2*spacing + r*spacing + 6;
+        const trunk = BABYLON.MeshBuilder.CreateCylinder("trunk"+ix, {
+          height:3, diameterTop:0.6, diameterBottom:0.8
+        }, scene);
+        trunk.position.set(x,1.5,z);
+        trunk.material = new BABYLON.StandardMaterial("tm"+ix, scene);
+        trunk.material.diffuseColor = new BABYLON.Color3(0.35,0.25,0.12);
 
-    const trunk = BABYLON.MeshBuilder.CreateCylinder("trunk"+i, {
-      height:3, diameterTop:0.6, diameterBottom:0.8
-    }, scene);
-    trunk.position.set(x,1.5,z);
-    trunk.material = new BABYLON.StandardMaterial("tm"+i, scene);
-    trunk.material.diffuseColor = new BABYLON.Color3(0.35,0.25,0.12);
+        const leaf = BABYLON.MeshBuilder.CreateCylinder("leaf"+ix, {
+          height:4, diameterBottom:3, diameterTop:0
+        }, scene);
+        leaf.position.set(x,4,z);
+        leaf.material = new BABYLON.StandardMaterial("lm"+ix, scene);
+        leaf.material.diffuseColor = color3(SETTINGS.groundTopColor);
 
-    const leaf = BABYLON.MeshBuilder.CreateCylinder("leaf"+i, {
-      height:4, diameterBottom:3, diameterTop:0
-    }, scene);
-    leaf.position.set(x,4,z);
-    leaf.material = new BABYLON.StandardMaterial("lm"+i, scene);
-    leaf.material.diffuseColor = color3(SETTINGS.groundTopColor);
+        trees.push({trunk,leaf});
+        ix++;
+      }
+    }
+  })();
 
-    trees.push({trunk,leaf});
+  /* ---------------- COAT TEXTURE (for small cubes only) ---------------- */
+  let coatTex = null;
+  if(SETTINGS.coatTexture){
+    coatTex = new BABYLON.Texture(SETTINGS.coatTexture, scene);
+    // ensure 1x1 and no repeating (clamp)
+    coatTex.uScale = SETTINGS.coatSize;
+    coatTex.vScale = SETTINGS.coatSize;
+    coatTex.wrapU = BABYLON.Texture.CLAMP_ADDRESSMODE;
+    coatTex.wrapV = BABYLON.Texture.CLAMP_ADDRESSMODE;
   }
 
-  /* ---------------- CUBES ---------------- */
+  /* ---------------- CUBES (SMALL) ---------------- */
+  // deterministic grid placement for cubes (fixed locations)
   const cubes = [];
-  let coatTex = SETTINGS.coatTexture
-    ? new BABYLON.Texture(SETTINGS.coatTexture, scene)
-    : null;
+  (function placeCubes(){
+    const count = SETTINGS.cubeCount;
+    const cols = Math.ceil(Math.sqrt(count));
+    const spacing = 6 + SETTINGS.cubeSize; // spacing between cubes
+    let ix = 0;
+    for(let r=0;r<cols && ix<count;r++){
+      for(let c=0;c<cols && ix<count;c++){
+        const x = -cols/2*spacing + c*spacing + 10; // offset from center
+        const z = -cols/2*spacing + r*spacing + 10;
+        const cmesh = BABYLON.MeshBuilder.CreateBox("cube"+ix, {size:SETTINGS.cubeSize}, scene);
+        cmesh.position.set(x, SETTINGS.cubeSize/2 + 0.1, z);
 
-  for(let i=0;i<SETTINGS.cubeCount;i++){
-    const x = rndRange(-groundSize/2 + 8, groundSize/2 - 8);
-    const z = rndRange(-groundSize/2 + 8, groundSize/2 - 8);
+        const m = new BABYLON.StandardMaterial("cm"+ix, scene);
+        if(coatTex){
+          // use a clone of the texture for per-material scaling if needed
+          m.diffuseTexture = coatTex.clone();
+          // set 1x1 mapping (u/v scale).
+          m.diffuseTexture.uScale = SETTINGS.coatSize;
+          m.diffuseTexture.vScale = SETTINGS.coatSize;
+          // clamp to avoid repeating
+          m.diffuseTexture.wrapU = BABYLON.Texture.CLAMP_ADDRESSMODE;
+          m.diffuseTexture.wrapV = BABYLON.Texture.CLAMP_ADDRESSMODE;
+          // Ensure the texture fills each face (default box UVs are OK for this)
+        } else {
+          m.diffuseColor = BABYLON.Color3.Random();
+        }
+        cmesh.material = m;
 
-    const c = BABYLON.MeshBuilder.CreateBox("cube"+i, {size:SETTINGS.cubeSize}, scene);
-    c.position.set(x, SETTINGS.cubeSize/2 + 0.1, z);
+        cmesh.physicsImpostor = new BABYLON.PhysicsImpostor(
+          cmesh,
+          BABYLON.PhysicsImpostor.BoxImpostor,
+          { mass:1, friction:1 },
+          scene
+        );
 
-    const m = new BABYLON.StandardMaterial("cm"+i, scene);
-    if(coatTex){
-      m.diffuseTexture = coatTex.clone();
-      m.diffuseTexture.uScale = SETTINGS.coatSize;
-      m.diffuseTexture.vScale = SETTINGS.coatSize;
-    } else {
-      m.diffuseColor = BABYLON.Color3.Random();
+        cubes.push(cmesh);
+        ix++;
+      }
     }
-    c.material = m;
+  })();
 
-    c.physicsImpostor = new BABYLON.PhysicsImpostor(
-      c,
-      BABYLON.PhysicsImpostor.BoxImpostor,
-      { mass:1, friction:1 },
-      scene
-    );
-
-    cubes.push(c);
-  }
-
-  /* ---------------- HILLS ---------------- */
+  /* ---------------- HILLS (BIG BOXES) ---------------- */
+  // deterministic grid placement for hills (fixed)
   const hills = [];
-  for(let i=0;i<SETTINGS.hillCount;i++){
-    const x = rndRange(-groundSize/2 + 20, groundSize/2 - 20);
-    const z = rndRange(-groundSize/2 + 20, groundSize/2 - 20);
+  (function placeHills(){
+    const count = SETTINGS.hillCount;
+    const cols = Math.ceil(Math.sqrt(count));
+    const spacing = 24;
+    let ix = 0;
+    for(let r=0;r<cols && ix<count;r++){
+      for(let c=0;c<cols && ix<count;c++){
+        const size = 6 + ix * 0.5; // slight size variance but deterministic
+        const x = -cols/2*spacing + c*spacing - 40; // shift them elsewhere
+        const z = -cols/2*spacing + r*spacing - 40;
+        const h = BABYLON.MeshBuilder.CreateBox("hill"+ix, {width:size, height:size/2, depth:size}, scene);
+        h.position.set(x, size/4 + 0.1, z);
 
-    const size = rndRange(6,16);
-    const h = BABYLON.MeshBuilder.CreateBox("hill"+i, {width:size, height:size/2, depth:size}, scene);
-    h.position.set(x, size/4 + 0.1, z);
+        // top material (green, matches ground top)
+        const top = new BABYLON.StandardMaterial("hTop"+ix, scene);
+        top.diffuseColor = color3(SETTINGS.groundTopColor);
 
-    const top = new BABYLON.StandardMaterial("hTop"+i, scene);
-    top.diffuseColor = color3(SETTINGS.groundTopColor);
+        // sides material (brown)
+        const sides = new BABYLON.StandardMaterial("hSide"+ix, scene);
+        sides.diffuseColor = color3(SETTINGS.groundSideColor);
 
-    const sides = new BABYLON.StandardMaterial("hSide"+i, scene);
-    if(coatTex){
-      sides.diffuseTexture = coatTex.clone();
-      sides.diffuseTexture.uScale = size/2;
-      sides.diffuseTexture.vScale = size/2;
-    } else {
-      sides.diffuseColor = color3(SETTINGS.groundSideColor);
+        // MultiMaterial: [front, back, right, left, top, bottom] - assign top green, rest brown
+        const mm = new BABYLON.MultiMaterial("hillM"+ix, scene);
+        mm.subMaterials = [sides,sides,sides,sides,top,sides];
+        h.material = mm;
+
+        // physics for hills
+        h.physicsImpostor = new BABYLON.PhysicsImpostor(
+          h,
+          BABYLON.PhysicsImpostor.BoxImpostor,
+          { mass:0, friction:1 },
+          scene
+        );
+
+        hills.push(h);
+        ix++;
+      }
     }
+  })();
 
-    const mm = new BABYLON.MultiMaterial("hillM"+i, scene);
-    mm.subMaterials = [sides,sides,sides,sides,top,sides];
-    h.material = mm;
-
-    hills.push(h);
-  }
-
-  /* ---------------- COINS ---------------- */
+  /* ---------------- COINS (random positions allowed) ---------------- */
   const coins = [];
   const coinMat = new BABYLON.StandardMaterial("coinMat", scene);
   coinMat.emissiveColor = new BABYLON.Color3(1,0.85,0.1);
