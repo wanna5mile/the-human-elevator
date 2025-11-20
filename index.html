@@ -32,23 +32,12 @@ const engine = new BABYLON.Engine(canvas, true);
 const SETTINGS = {
   groundColor: "#33FF4B",
   skyColor:    "#9DE9FF",
-  cubeCount:   30,
   respawnY:   -20,
   moveForce:   18,
   maxSpeed:    8,
   jumpForce:   6.2,
-  damp:        0.95, // damping when no keys pressed
-  coatTexture: "box-texture.png",
-  coatSize:    2.04,
-  cubeSize:    2,
-  safeRadius:  8
+  damp:        0.95
 };
-
-const RAMPS = [
-  { x: 20,  z: 20,  rotY: 0,          angle: Math.PI/6 },
-  { x: -30, z: -10, rotY: Math.PI/2,  angle: Math.PI/6 },
-  { x: 40,  z: -40, rotY: Math.PI/3,  angle: Math.PI/6 }
-];
 
 function createScene() {
   const scene = new BABYLON.Scene(engine);
@@ -71,116 +60,24 @@ function createScene() {
   sphere.material = sMat;
   sphere.physicsImpostor = new BABYLON.PhysicsImpostor(sphere,BABYLON.PhysicsImpostor.SphereImpostor,{mass:1,friction:0.6,restitution:0.05},scene);
 
-  // Arrows
-  function makeArrow(name,color){
-    const a = BABYLON.MeshBuilder.CreatePlane(name,{size:1.2},scene);
-    const m = new BABYLON.StandardMaterial(name+"Mat",scene);
-    m.diffuseColor = BABYLON.Color3.FromHexString(color);
-    m.alpha = 0.9;
-    a.material = m;
-    a.billboardMode = BABYLON.Mesh.BILLBOARDMODE_ALL;
-    a.parent = sphere;
-    return a;
-  }
-  const arrows = {
-    forward: makeArrow("aF","#00FF00"),
-    back:    makeArrow("aB","#FF0000"),
-    left:    makeArrow("aL","#00A2FF"),
-    right:   makeArrow("aR","#FFD800")
-  };
-  arrows.forward.position.set(0,1.5,-2);
-  arrows.back.position.set(0,1.5,2);
-  arrows.left.position.set(-2,1.5,0);
-  arrows.right.position.set(2,1.5,0);
-  function updateArrows(i){
-    arrows.forward.material.emissiveColor = i.forward ? BABYLON.Color3.White() : BABYLON.Color3.Black();
-    arrows.back.material.emissiveColor    = i.back    ? BABYLON.Color3.White() : BABYLON.Color3.Black();
-    arrows.left.material.emissiveColor    = i.left    ? BABYLON.Color3.White() : BABYLON.Color3.Black();
-    arrows.right.material.emissiveColor   = i.right   ? BABYLON.Color3.White() : BABYLON.Color3.Black();
-  }
-
-  // Ramps
-  for(const r of RAMPS){
-    const ramp = BABYLON.MeshBuilder.CreateBox("ramp",{width:12,depth:8,height:2},scene);
-    const m = new BABYLON.StandardMaterial("rm",scene);
-    m.diffuseColor = BABYLON.Color3.Random();
-    ramp.material = m;
-    ramp.position.set(r.x,1,r.z);
-    ramp.rotation.set(-r.angle,r.rotY,0);
-    ramp.physicsImpostor = new BABYLON.PhysicsImpostor(ramp,BABYLON.PhysicsImpostor.BoxImpostor,{mass:0,friction:1,restitution:0},scene);
-  }
-
-  // Cubes
-  const cubes=[];
-  const sharedCoatTexture = new BABYLON.Texture(SETTINGS.coatTexture,scene);
-  function spawnCube(x,z,y){
-    const base = BABYLON.MeshBuilder.CreateBox("cube",{size:SETTINGS.cubeSize},scene);
-    const bMat = new BABYLON.StandardMaterial("bMat",scene);
-    bMat.diffuseColor = BABYLON.Color3.Random();
-    bMat.specularColor = BABYLON.Color3.Black();
-    base.material = bMat;
-
-    const coat = BABYLON.MeshBuilder.CreateBox("coat",{size:SETTINGS.coatSize},scene);
-    const cMat = new BABYLON.StandardMaterial("cMat",scene);
-    cMat.diffuseTexture = sharedCoatTexture;
-    cMat.diffuseTexture.hasAlpha = true;
-    cMat.useAlphaFromDiffuseTexture = true;
-    cMat.specularColor = BABYLON.Color3.Black();
-    coat.material = cMat;
-    coat.parent = base;
-
-    base.position.set(x,y,z);
-    base.physicsImpostor = new BABYLON.PhysicsImpostor(base,BABYLON.PhysicsImpostor.BoxImpostor,{mass:1,friction:1,restitution:0.05},scene);
-    cubes.push({mesh:base,x,y,z});
-  }
-  for(let i=0;i<SETTINGS.cubeCount;i++){
-    let x,z;
-    do{x=(Math.random()-0.5)*260; z=(Math.random()-0.5)*260;} while(Math.hypot(x,z)<SETTINGS.safeRadius);
-    spawnCube(x,z, 8+Math.random()*12);
-  }
-
   // Camera
   const camera = new BABYLON.ArcRotateCamera("cam",0,BABYLON.Tools.ToRadians(55),18,sphere.position.clone(),scene);
   camera.attachControl(canvas,true);
-  camera.lowerRadiusLimit=6; camera.upperRadiusLimit=40; 
+  camera.lowerRadiusLimit=6; camera.upperRadiusLimit=40;
   camera.wheelDeltaPercentage=0.01;
 
-  let manualCam=false,lastManual=0;
-  const CAM_TIMEOUT = 1500;
-  const angleDisplay = document.getElementById("angleDisplay");
+  const input = {forward:false,jump:false};
 
   window.addEventListener("keydown",e=>{
-    if(e.key.startsWith("Arrow")){
-      manualCam=true; lastManual=performance.now();
-      if(e.key==="ArrowLeft") camera.alpha-=0.03;
-      if(e.key==="ArrowRight") camera.alpha+=0.03;
-      if(e.key==="ArrowUp") camera.beta=Math.max(0.2,camera.beta-0.03);
-      if(e.key==="ArrowDown") camera.beta=Math.min(Math.PI-0.2,camera.beta+0.03);
-    }
-  });
-
-  // Input
-  const input={forward:false,back:false,left:false,right:false,jump:false};
-  window.addEventListener("keydown",e=>{
-    const k=e.key.toLowerCase();
-    if(k==="w")input.forward=true;
-    if(k==="s")input.back=true;
-    if(k==="a")input.left=true;
-    if(k==="d")input.right=true;
-    if(e.key===" ")input.jump=true;
+    if(e.key.toLowerCase()==="w") input.forward=true;
+    if(e.key===" ") input.jump=true;
   });
   window.addEventListener("keyup",e=>{
-    const k=e.key.toLowerCase();
-    if(k==="w")input.forward=false;
-    if(k==="s")input.back=false;
-    if(k==="a")input.left=false;
-    if(k==="d")input.right=false;
-    if(e.key===" ")input.jump=false;
+    if(e.key.toLowerCase()==="w") input.forward=false;
+    if(e.key===" ") input.jump=false;
   });
 
-  // Game loop
   const rayDown = new BABYLON.Vector3(0,-1,0);
-
   const grounded = () => {
     const ray = new BABYLON.Ray(sphere.position, rayDown, 1.15);
     const hit = scene.pickWithRay(ray,m=>m!==sphere);
@@ -197,30 +94,18 @@ function createScene() {
   };
 
   scene.registerBeforeRender(()=>{
-    updateArrows(input);
-    if(manualCam && performance.now()-lastManual > CAM_TIMEOUT) manualCam=false;
-
-    // Camera-relative directions
-    const forward = new BABYLON.Vector3(Math.sin(camera.alpha+Math.PI),0,Math.cos(camera.alpha+Math.PI));
-    const right = new BABYLON.Vector3(forward.z,0,-forward.x);
-
-    let dir = BABYLON.Vector3.Zero();
-    if(input.forward) dir.addInPlace(forward);
-    if(input.back) dir.subtractInPlace(forward);
-    if(input.left) dir.subtractInPlace(right);
-    if(input.right) dir.addInPlace(right);
-
-    if(dir.lengthSquared()>0.001){
-      dir.normalize();
-      // Always move relative to camera direction
-      const impulse = dir.scale(SETTINGS.moveForce * engine.getDeltaTime()*0.03);
+    // Move forward only
+    if(input.forward){
+      const forward = new BABYLON.Vector3(Math.sin(camera.alpha+Math.PI),0,Math.cos(camera.alpha+Math.PI));
+      const impulse = forward.scale(SETTINGS.moveForce * engine.getDeltaTime()*0.03);
       sphere.physicsImpostor.applyImpulse(impulse, sphere.getAbsolutePosition());
     } else {
-      // Slowdown when no input
+      // damping when no input
       const v = sphere.physicsImpostor.getLinearVelocity();
-      sphere.physicsImpostor.setLinearVelocity(new BABYLON.Vector3(v.x*SETTINGS.damp, v.y, v.z*SETTINGS.damp));
+      sphere.physicsImpostor.setLinearVelocity(new BABYLON.Vector3(v.x*SETTINGS.damp,v.y,v.z*SETTINGS.damp));
     }
 
+    // Jump
     if(input.jump && grounded()){
       const v = sphere.physicsImpostor.getLinearVelocity();
       sphere.physicsImpostor.setLinearVelocity(new BABYLON.Vector3(v.x,SETTINGS.jumpForce,v.z));
@@ -228,17 +113,10 @@ function createScene() {
 
     clampHorizontalSpeed();
 
+    // Respawn if fall
     if(sphere.position.y < SETTINGS.respawnY){
       sphere.position.set(0,6,0);
       sphere.physicsImpostor.setLinearVelocity(BABYLON.Vector3.Zero());
-    }
-
-    for(const c of cubes){
-      if(c.mesh.position.y < SETTINGS.respawnY){
-        c.mesh.position.set(c.x,c.y,c.z);
-        c.mesh.physicsImpostor.setLinearVelocity(BABYLON.Vector3.Zero());
-        c.mesh.physicsImpostor.setAngularVelocity(BABYLON.Vector3.Zero());
-      }
     }
 
     // Camera follows the sphere
@@ -246,7 +124,7 @@ function createScene() {
 
     let angleDeg = (camera.alpha*180/Math.PI)%360;
     if(angleDeg<0) angleDeg+=360;
-    angleDisplay.textContent = "Angle: "+angleDeg.toFixed(0)+"°";
+    document.getElementById("angleDisplay").textContent = "Angle: "+angleDeg.toFixed(0)+"°";
   });
 
   return scene;
