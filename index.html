@@ -53,6 +53,7 @@ const SETTINGS = {
   groundTopColor:  "#33FF4B",
   groundSideColor: "#8B5A2B",
   waterColor:      "#4DA6FF",
+  waterUnderColor: "#0B3B8C", // dark bluish when underwater
   skyColor:        "#9DE9FF",
 
   cubeCount: 30,
@@ -78,6 +79,10 @@ const SETTINGS = {
   coatSize: 1.0   // 1x1, no repeat
 };
 
+// water depth choice C -> 20 units
+const WATER_DEPTH = 20;
+const WATER_SURFACE_Y = 0; // keep water surface at y=0 (top)
+
 function rndRange(min,max){ return Math.random()*(max-min)+min; }
 function color3(hex){ return BABYLON.Color3.FromHexString(hex); }
 
@@ -85,19 +90,12 @@ function color3(hex){ return BABYLON.Color3.FromHexString(hex); }
    TRIANGULAR RAMP (true 3D wedge using ExtrudeShape)
 ============================================================ */
 function makeTriWedge(scene, name="ramp", width=10, height=6, depth=8) {
-  // triangle in X/Y
   const tri = [
-    new BABYLON.Vector3(0, 0, 0),         // bottom-left
-    new BABYLON.Vector3(width, 0, 0),     // bottom-right
-    new BABYLON.Vector3(0, height, 0),    // top-left
-    // close shape automatically when extrude called
-  ];
-
-  // simple straight path in Z
-  const path = [
     new BABYLON.Vector3(0, 0, 0),
-    new BABYLON.Vector3(0, 0, depth)
+    new BABYLON.Vector3(width, 0, 0),
+    new BABYLON.Vector3(0, height, 0)
   ];
+  const path = [ new BABYLON.Vector3(0,0,0), new BABYLON.Vector3(0,0,depth) ];
 
   const ramp = BABYLON.MeshBuilder.ExtrudeShape(name, {
     shape: tri,
@@ -105,15 +103,13 @@ function makeTriWedge(scene, name="ramp", width=10, height=6, depth=8) {
     cap: BABYLON.Mesh.CAP_ALL
   }, scene);
 
-  // position it so base rests on ground: center of geometry will be at height/2
+  // position so top of ramp lines up with world Y if we want top at height
   ramp.position.y = height / 2;
 
-  // material
   const mat = new BABYLON.StandardMaterial(name + "Mat", scene);
   mat.diffuseColor = new BABYLON.Color3(0.65,0.65,0.65);
   ramp.material = mat;
 
-  // physics: mesh impostor for accurate slope collisions, anchored
   ramp.physicsImpostor = new BABYLON.PhysicsImpostor(
     ramp,
     BABYLON.PhysicsImpostor.MeshImpostor,
@@ -128,21 +124,13 @@ function makeTriWedge(scene, name="ramp", width=10, height=6, depth=8) {
 }
 
 /* ============================================================
-   PYRAMID PLACER
-   baseCount = number of cubes on base row (e.g., 5 => 5x5 base)
-   spacing = distance between cube centers
-   origin x/z specify base center
+   PYRAMID PLACER (same as before)
 ============================================================ */
 function placeCubePyramid(scene, originX, originZ, baseCount = 5, cubeSize = 2, spacing = 2.2) {
   const meshes = [];
-  // compute starting offset so base is centered on origin
-  const baseWidth = baseCount * spacing;
-  const startX = originX - (baseWidth/2) + spacing/2;
-  const startZ = originZ - (baseWidth/2) + spacing/2;
-
   let layer = 0;
   for (let n = baseCount; n >= 1; n--) {
-    const layerY = (cubeSize/2) + layer * (cubeSize + 0.02); // slight gap
+    const layerY = (cubeSize/2) + layer * (cubeSize + 0.02);
     const rowWidth = n * spacing;
     const rowStartX = originX - (rowWidth/2) + spacing/2;
     const rowStartZ = originZ - (rowWidth/2) + spacing/2;
@@ -154,7 +142,6 @@ function placeCubePyramid(scene, originX, originZ, baseCount = 5, cubeSize = 2, 
         box.position.set(x, layerY, z);
 
         const m = new BABYLON.StandardMaterial("pyrMat_" + layer + "_" + r + "_" + c, scene);
-        // use same coat texture style if provided
         if (SETTINGS.coatTexture) {
           const tex = new BABYLON.Texture(SETTINGS.coatTexture, scene);
           tex.uScale = SETTINGS.coatSize;
@@ -187,7 +174,6 @@ function placeCubePyramid(scene, originX, originZ, baseCount = 5, cubeSize = 2, 
 ============================================================ */
 function createScene(){
   const scene = new BABYLON.Scene(engine);
-  scene.clearColor = color3(SETTINGS.dayColor);
 
   /* lights */
   const hemi = new BABYLON.HemisphericLight("hemi", new BABYLON.Vector3(0,1,0), scene);
@@ -198,39 +184,80 @@ function createScene(){
 
   scene.enablePhysics(new BABYLON.Vector3(0,-9.81,0), new BABYLON.CannonJSPlugin());
 
-  /* ---------------- GROUND ---------------- */
+  /* ---------------- GROUND AS A CUBE (visible) ---------------- */
   const groundSize = 300;
+  const groundHeight = 10; // top at y=0 (so box centered at y=-5)
 
-  const groundVis = BABYLON.MeshBuilder.CreateGround(
-    "groundVis",
-    { width: groundSize, height: groundSize, subdivisions: 4 },
-    scene
-  );
-  groundVis.material = new BABYLON.StandardMaterial("gMat", scene);
-  groundVis.material.diffuseColor = color3(SETTINGS.groundTopColor);
+  const groundBox = BABYLON.MeshBuilder.CreateBox("groundBox", {
+    width: groundSize,
+    height: groundHeight,
+    depth: groundSize
+  }, scene);
 
-  const groundPhys = BABYLON.MeshBuilder.CreateBox(
-    "groundPhys",
-    { width: groundSize, height: 10, depth: groundSize },
-    scene
-  );
-  groundPhys.position.y = -5;
-  groundPhys.isVisible = false;
-  groundPhys.physicsImpostor = new BABYLON.PhysicsImpostor(
-    groundPhys,
+  // position so top of ground is at y=0
+  groundBox.position.y = -groundHeight/2 + 0.0; // center at -5 -> top at 0
+
+  // materials: MultiMaterial order [front, back, right, left, top, bottom]
+  const topMat = new BABYLON.StandardMaterial("groundTopMat", scene);
+  topMat.diffuseColor = color3(SETTINGS.groundTopColor);
+
+  const sideMat = new BABYLON.StandardMaterial("groundSideMat", scene);
+  sideMat.diffuseColor = color3(SETTINGS.groundSideColor);
+
+  const groundMulti = new BABYLON.MultiMaterial("groundMulti", scene);
+  groundMulti.subMaterials = [sideMat, sideMat, sideMat, sideMat, topMat, sideMat];
+  groundBox.material = groundMulti;
+
+  // create subMeshes for box to assign faces (default box generates 6 faces in a single mesh)
+  // Babylon's CreateBox automatically generates subMeshes indices, but ensure assignment:
+  // (This is safe: subMeshes will correspond to order used above)
+
+  // physics for ground (static)
+  groundBox.physicsImpostor = new BABYLON.PhysicsImpostor(
+    groundBox,
     BABYLON.PhysicsImpostor.BoxImpostor,
-    { mass:0 },
+    { mass: 0, friction: 1 },
     scene
   );
 
-  /* ---------------- WATER ---------------- */
-  const water = BABYLON.MeshBuilder.CreateGround("water", { width:700, height:700 }, scene);
-  water.position.y = -4.2;
+  /* ---------------- WATER SURFACE & VOLUME ---------------- */
+  // Water surface (for reflections/normal map)
+  const waterMesh = BABYLON.MeshBuilder.CreateGround("waterSurface", { width: 700, height: 700, subdivisions: 32 }, scene);
+  waterMesh.position.y = WATER_SURFACE_Y;
+  const waterMat = new BABYLON.WaterMaterial("waterMat", scene, {});
 
-  const waterMat = new BABYLON.WaterMaterial("waterMat", scene);
+
+  // configure waterMaterial for nice surface
+  waterMat.bumpTexture = new BABYLON.Texture("https://cdn.babylonjs.com/textures/waterbump.png", scene);
+  waterMat.windForce = -5;
+  waterMat.waveHeight = 0.5;
+  waterMat.waveLength = 0.1;
   waterMat.waterColor = color3(SETTINGS.waterColor);
-  water.material = waterMat;
-  waterMat.addToRenderList(groundVis);
+  waterMat.colorBlendFactor = 0.3;
+  waterMat.addToRenderList(groundBox);
+  // optionally add more to renderList (pyramids, etc.) if you want reflection
+  if (scene.getMeshByName("pyr_cube_0_0_0")) waterMat.addToRenderList(scene.getMeshByName("pyr_cube_0_0_0"));
+
+  waterMesh.material = waterMat;
+  waterMesh.receiveShadows = true;
+
+  // water volume - semi-transparent box representing depth
+  const waterVol = BABYLON.MeshBuilder.CreateBox("waterVolume", {
+    width: 700,
+    height: WATER_DEPTH,
+    depth: 700
+  }, scene);
+  // position center so top is at WATER_SURFACE_Y
+  waterVol.position.y = WATER_SURFACE_Y - WATER_DEPTH/2;
+  const waterVolMat = new BABYLON.StandardMaterial("waterVolMat", scene);
+  waterVolMat.diffuseColor = color3(SETTINGS.waterColor);
+  waterVolMat.alpha = 0.35;
+  waterVolMat.backFaceCulling = false;
+  waterVolMat.specularColor = new BABYLON.Color3(0,0,0);
+  waterVol.material = waterVolMat;
+  waterVol.isPickable = false;
+
+  // make sure water volume doesn't interfere with physics (no impostor)
 
   /* ---------------- RAMPS (wedge ramps) ---------------- */
   const RAMPS = [
@@ -252,7 +279,7 @@ function createScene(){
   for (let i = 0; i < ramps.length; i++) {
     const ramp = ramps[i].mesh;
     const pos = ramp.position.clone();
-    pos.y += SETTINGS.ringHeightOffset;
+    pos.y += ramps[i].def.height + SETTINGS.ringHeightOffset; // above ramp top
 
     const tor = BABYLON.MeshBuilder.CreateTorus(
       "ring" + i,
@@ -281,7 +308,6 @@ function createScene(){
       const x = rndRange(-groundSize/2 + 10, groundSize/2 - 10);
       const z = rndRange(-groundSize/2 + 10, groundSize/2 - 10);
 
-      // avoid ramps/hills/water
       let ok = true;
       for (const r of RAMPS) {
         if (Math.hypot(x - r.x, z - r.z) < Math.max(r.width, 10) + 6) { ok = false; break; }
@@ -347,22 +373,18 @@ function createScene(){
       const x = rndRange(-groundSize/2 + 12, groundSize/2 - 12);
       const z = rndRange(-groundSize/2 + 12, groundSize/2 - 12);
 
-      // avoid water area (y check is static), avoid ramps and hills area
       let ok = true;
       for (const r of RAMPS) {
         if (Math.hypot(x - r.x, z - r.z) < Math.max(r.width, 10) + 4) { ok = false; break; }
       }
       if (!ok) continue;
 
-      // avoid pyramid spot (we'll place pyramid nearby)
-      // check against existing placedPositions
       let tooClose = false;
       for (const p of placedPositions) {
         if (Math.hypot(x - p.x, z - p.z) < minDist) { tooClose = true; break; }
       }
       if (tooClose) continue;
 
-      // create cube
       const cmesh = BABYLON.MeshBuilder.CreateBox("cube"+placed, { size: SETTINGS.cubeSize }, scene);
       cmesh.position.set(x, SETTINGS.cubeSize/2 + 0.1, z);
 
@@ -391,9 +413,8 @@ function createScene(){
     }
   })();
 
-  /* ---------------- PYRAMID (placed anywhere on ground cube) ---------------- */
-  // We'll pick a safe spot: try some candidate coordinates then pick one not colliding with ramps/hills/water
-  let pyrX = -5, pyrZ = 5; // default
+  /* ---------------- PYRAMID ---------------- */
+  let pyrX = -5, pyrZ = 5;
   (function pickPyramidSpot(){
     const candidates = [
       {x:-5,z:5}, {x:10,z:-8}, {x: -12, z: 22}, {x: 25, z: -6}, {x:0, z: 0}
@@ -406,11 +427,9 @@ function createScene(){
       if (ok) { pyrX = cand.x; pyrZ = cand.z; break; }
     }
   })();
-
-  // create a 5-layer pyramid (5x5 base)
   const pyramidMeshes = placeCubePyramid(scene, pyrX, pyrZ, 5, SETTINGS.cubeSize, SETTINGS.cubeSize + 0.2);
 
-  /* ---------------- HILLS (big boxes) ---------------- */
+  /* ---------------- HILLS (big boxes) - top green, sides brown ---------------- */
   const hills = [];
   (function placeHills(){
     const count = SETTINGS.hillCount;
@@ -427,10 +446,10 @@ function createScene(){
         h.position.set(x, size/4 + 0.1, z);
 
         const top = new BABYLON.StandardMaterial("hTop"+ix, scene);
-        top.diffuseColor = color3(SETTINGS.groundTopColor);
+        top.diffuseColor = color3(SETTINGS.groundTopColor); // green top
 
         const sides = new BABYLON.StandardMaterial("hSide"+ix, scene);
-        sides.diffuseColor = color3(SETTINGS.groundSideColor);
+        sides.diffuseColor = color3(SETTINGS.groundSideColor); // brown sides
 
         const mm = new BABYLON.MultiMaterial("hillM"+ix, scene);
         mm.subMaterials = [sides, sides, sides, sides, top, sides];
@@ -449,48 +468,62 @@ function createScene(){
     }
   })();
 
-  /* ---------------- COINS (random positions allowed) ---------------- */
+  /* ---------------- COINS ---------------- */
   const coins = [];
   const coinMat = new BABYLON.StandardMaterial("coinMat", scene);
   coinMat.emissiveColor = new BABYLON.Color3(1,0.85,0.1);
 
   function spawnCoin(id){
-    const c = BABYLON.MeshBuilder.CreateTorus(
-      "coin"+id,
-      { diameter:1, thickness:0.2 },
-      scene
-    );
+    const c = BABYLON.MeshBuilder.CreateTorus("coin"+id, { diameter:1, thickness:0.2 }, scene);
     c.rotation.x = Math.PI/2;
     c.material = coinMat;
-
-    c.position.set(
-      rndRange(-groundSize/2+12, groundSize/2-12),
-      1.2,
-      rndRange(-groundSize/2+12, groundSize/2-12)
-    );
+    c.position.set(rndRange(-groundSize/2+12, groundSize/2-12), 1.2, rndRange(-groundSize/2+12, groundSize/2-12));
     return c;
   }
-
-  for (let i = 0; i < SETTINGS.coinMax; i++) {
-    coins.push({ id: i, mesh: spawnCoin(i), active: true });
-  }
+  for (let i = 0; i < SETTINGS.coinMax; i++) coins.push({ id: i, mesh: spawnCoin(i), active: true });
 
   /* ---------------- CAMERA ---------------- */
-  const camera = new BABYLON.ArcRotateCamera(
-    "cam",
-    Math.PI/2,
-    Math.PI/3,
-    60,
-    new BABYLON.Vector3(0,0,0),
-    scene
-  );
+  const camera = new BABYLON.ArcRotateCamera("cam", Math.PI/2, Math.PI/3, 60, new BABYLON.Vector3(0,0,0), scene);
   camera.attachControl(canvas,true);
 
-  /* day/night cycle */
+  /* day/night + underwater override */
   scene.registerBeforeRender(()=>{
+    // day/night base color
     const t = (Date.now() % SETTINGS.dayNightCycleMs) / SETTINGS.dayNightCycleMs;
     const mix = Math.sin(t * Math.PI * 2) * 0.5 + 0.5;
-    scene.clearColor = BABYLON.Color3.Lerp(color3(SETTINGS.nightColor), color3(SETTINGS.dayColor), mix);
+    const dayNightColor = BABYLON.Color3.Lerp(color3(SETTINGS.nightColor), color3(SETTINGS.dayColor), mix);
+
+    // underwater check
+    const camY = camera.position.y;
+    const underwater = camY < WATER_SURFACE_Y;
+
+    if (underwater) {
+      // darker blue clear color and a bit of fogginess
+      scene.clearColor = color3(SETTINGS.waterUnderColor);
+      scene.fogMode = BABYLON.Scene.FOGMODE_EXP2;
+      scene.fogDensity = 0.02;
+      scene.fogColor = color3(SETTINGS.waterUnderColor);
+
+      // darken water surface coloring slightly
+      waterMat.waterColor = color3(SETTINGS.waterUnderColor);
+      waterVolMat.diffuseColor = color3(SETTINGS.waterUnderColor);
+      waterVolMat.alpha = 0.45;
+    } else {
+      // normal sky/day color
+      scene.clearColor = dayNightColor;
+      scene.fogMode = BABYLON.Scene.FOGMODE_NONE;
+
+      waterMat.waterColor = color3(SETTINGS.waterColor);
+      waterVolMat.diffuseColor = color3(SETTINGS.waterColor);
+      waterVolMat.alpha = 0.35;
+    }
+
+    // animate water normals
+    if (waterMat) {
+      const now = performance.now() * 0.001;
+      waterMat.bumpTexture.uOffset = Math.sin(now * 0.3) * 0.02;
+      waterMat.bumpTexture.vOffset = Math.cos(now * 0.27) * 0.02;
+    }
   });
 
   return scene;
