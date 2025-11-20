@@ -36,7 +36,7 @@ const SETTINGS = {
 
 // water depth choice C -> 20 units
 const WATER_DEPTH = 20;
-const WATER_SURFACE_Y = 0; // keep water surface at y=0 (top)
+const WATER_SURFACE_Y = -3; // keep water surface at y=0 (top)
 
 function rndRange(min,max){ return Math.random()*(max-min)+min; }
 function color3(hex){ return BABYLON.Color3.FromHexString(hex); }
