@@ -26,9 +26,6 @@
 <div id="angleDisplay">Angle: 0°</div>
 
 <script>
-/* ============================================================
-   INIT
-============================================================ */
 const canvas = document.getElementById("renderCanvas");
 const engine = new BABYLON.Engine(canvas, true);
 
@@ -37,10 +34,10 @@ const SETTINGS = {
   skyColor:    "#9DE9FF",
   cubeCount:   30,
   respawnY:   -20,
-  moveForce:   7.5,
+  moveForce:   18,       // stronger for impulse-based control
   maxSpeed:    8,
   jumpForce:   6.2,
-  damp:        0.92,
+  damp:        0.98,     // slight damping
   coatTexture: "box-texture.png",
   coatSize:    2.04,
   cubeSize:    2,
@@ -53,30 +50,26 @@ const RAMPS = [
   { x: 40,  z: -40, rotY: Math.PI/3,  angle: Math.PI/6 }
 ];
 
-/* ============================================================
-   CREATE SCENE
-============================================================ */
 function createScene() {
   const scene = new BABYLON.Scene(engine);
   scene.clearColor = BABYLON.Color3.FromHexString(SETTINGS.skyColor);
-
   new BABYLON.HemisphericLight("light", new BABYLON.Vector3(0,1,0), scene);
-  scene.enablePhysics(new BABYLON.Vector3(0, -9.81, 0), new BABYLON.CannonJSPlugin());
+  scene.enablePhysics(new BABYLON.Vector3(0,-9.81,0), new BABYLON.CannonJSPlugin());
 
   /* ---------------- GROUND ---------------- */
-  const ground = BABYLON.MeshBuilder.CreateGround("ground", { width:300, height:300 }, scene);
-  const groundMat = new BABYLON.StandardMaterial("gMat", scene);
-  groundMat.diffuseColor = BABYLON.Color3.FromHexString(SETTINGS.groundColor);
-  ground.material = groundMat;
-  ground.physicsImpostor = new BABYLON.PhysicsImpostor(ground,BABYLON.PhysicsImpostor.BoxImpostor,{ mass:0, friction:2, restitution:0 },scene);
+  const ground = BABYLON.MeshBuilder.CreateGround("ground",{width:300,height:300},scene);
+  const gMat = new BABYLON.StandardMaterial("gMat",scene);
+  gMat.diffuseColor = BABYLON.Color3.FromHexString(SETTINGS.groundColor);
+  ground.material = gMat;
+  ground.physicsImpostor = new BABYLON.PhysicsImpostor(ground,BABYLON.PhysicsImpostor.BoxImpostor,{mass:0,friction:2,restitution:0},scene);
 
   /* ---------------- PLAYER SPHERE ---------------- */
-  const sphere = BABYLON.MeshBuilder.CreateSphere("player", { diameter:2 }, scene);
+  const sphere = BABYLON.MeshBuilder.CreateSphere("player",{diameter:2},scene);
   sphere.position.set(0,3,0);
-  const sphereMat = new BABYLON.StandardMaterial("sphereMat", scene);
-  sphereMat.diffuseColor = BABYLON.Color3.Random();
-  sphere.material = sphereMat;
-  sphere.physicsImpostor = new BABYLON.PhysicsImpostor(sphere,BABYLON.PhysicsImpostor.SphereImpostor,{ mass:1, friction:0.6, restitution:0.05 },scene);
+  const sMat = new BABYLON.StandardMaterial("sMat",scene);
+  sMat.diffuseColor = BABYLON.Color3.Random();
+  sphere.material = sMat;
+  sphere.physicsImpostor = new BABYLON.PhysicsImpostor(sphere,BABYLON.PhysicsImpostor.SphereImpostor,{mass:1,friction:0.6,restitution:0.05},scene);
 
   /* ---------------- ARROWS ---------------- */
   function makeArrow(name,color){
@@ -93,15 +86,13 @@ function createScene() {
   const arrows = {
     forward: makeArrow("aF","#00FF00"),
     back:    makeArrow("aB","#FF0000"),
-    left:    makeArrow("aR","#00A2FF"),
-    right:   makeArrow("aL","#FFD800")
+    left:    makeArrow("aL","#00A2FF"),
+    right:   makeArrow("aR","#FFD800")
   };
-
   arrows.forward.position.set(0,1.5,-2);
   arrows.back.position.set(0,1.5,2);
   arrows.left.position.set(-2,1.5,0);
   arrows.right.position.set(2,1.5,0);
-
   function updateArrows(i){
     arrows.forward.material.emissiveColor = i.forward ? BABYLON.Color3.White() : BABYLON.Color3.Black();
     arrows.back.material.emissiveColor    = i.back    ? BABYLON.Color3.White() : BABYLON.Color3.Black();
@@ -116,14 +107,13 @@ function createScene() {
     m.diffuseColor = BABYLON.Color3.Random();
     ramp.material = m;
     ramp.position.set(r.x,1,r.z);
-    ramp.rotation.set(-r.angle, r.rotY, 0);
-    ramp.physicsImpostor = new BABYLON.PhysicsImpostor(ramp,BABYLON.PhysicsImpostor.BoxImpostor,{ mass:0, friction:1, restitution:0 },scene);
+    ramp.rotation.set(-r.angle,r.rotY,0);
+    ramp.physicsImpostor = new BABYLON.PhysicsImpostor(ramp,BABYLON.PhysicsImpostor.BoxImpostor,{mass:0,friction:1,restitution:0},scene);
   }
 
   /* ---------------- CUBES ---------------- */
-  const cubes = [];
-  const sharedCoatTexture = new BABYLON.Texture(SETTINGS.coatTexture, scene);
-
+  const cubes=[];
+  const sharedCoatTexture = new BABYLON.Texture(SETTINGS.coatTexture,scene);
   function spawnCube(x,z,y){
     const base = BABYLON.MeshBuilder.CreateBox("cube",{size:SETTINGS.cubeSize},scene);
     const bMat = new BABYLON.StandardMaterial("bMat",scene);
@@ -141,25 +131,19 @@ function createScene() {
     coat.parent = base;
 
     base.position.set(x,y,z);
-    base.physicsImpostor = new BABYLON.PhysicsImpostor(base,BABYLON.PhysicsImpostor.BoxImpostor,{ mass:1, friction:1, restitution:0.05 },scene);
+    base.physicsImpostor = new BABYLON.PhysicsImpostor(base,BABYLON.PhysicsImpostor.BoxImpostor,{mass:1,friction:1,restitution:0.05},scene);
     cubes.push({mesh:base,x,y,z});
   }
-
   for(let i=0;i<SETTINGS.cubeCount;i++){
     let x,z;
-    do {
-      x=(Math.random()-0.5)*260;
-      z=(Math.random()-0.5)*260;
-    } while(Math.hypot(x,z)<SETTINGS.safeRadius);
+    do{x=(Math.random()-0.5)*260; z=(Math.random()-0.5)*260;} while(Math.hypot(x,z)<SETTINGS.safeRadius);
     spawnCube(x,z, 8+Math.random()*12);
   }
 
   /* ---------------- CAMERA ---------------- */
   const camera = new BABYLON.ArcRotateCamera("cam",0,BABYLON.Tools.ToRadians(55),18,sphere.position.clone(),scene);
   camera.attachControl(canvas,true);
-  camera.lowerRadiusLimit = 6;
-  camera.upperRadiusLimit = 40;
-  camera.wheelDeltaPercentage = 0.01;
+  camera.lowerRadiusLimit=6; camera.upperRadiusLimit=40; camera.wheelDeltaPercentage=0.01;
 
   let manualCam=false,lastManual=0;
   const CAM_TIMEOUT = 1500;
@@ -195,55 +179,52 @@ function createScene() {
   });
 
   /* ---------------- GAME LOOP ---------------- */
-  let lastMove = new BABYLON.Vector3(0,0,1);
   const rayDown = new BABYLON.Vector3(0,-1,0);
+  let lastMove = new BABYLON.Vector3(0,0,1);
 
   const grounded = () => {
     const ray = new BABYLON.Ray(sphere.position, rayDown, 1.15);
-    const hit = scene.pickWithRay(ray, m=>m!==sphere);
+    const hit = scene.pickWithRay(ray,m=>m!==sphere);
     return hit && hit.hit;
   };
 
-  const clampVel = v=>{
+  const clampHorizontalSpeed = () => {
+    const v = sphere.physicsImpostor.getLinearVelocity();
     const h = new BABYLON.Vector3(v.x,0,v.z);
-    const l = h.length();
-    if(l>SETTINGS.maxSpeed){ h.scaleInPlace(SETTINGS.maxSpeed/l); return new BABYLON.Vector3(h.x,v.y,h.z);}
-    return v;
+    if(h.length()>SETTINGS.maxSpeed){
+      h.normalize().scaleInPlace(SETTINGS.maxSpeed);
+      sphere.physicsImpostor.setLinearVelocity(new BABYLON.Vector3(h.x,v.y,h.z));
+    }
   };
 
   scene.registerBeforeRender(()=>{
     updateArrows(input);
-
     if(manualCam && performance.now()-lastManual > CAM_TIMEOUT) manualCam=false;
 
+    // Camera-relative directions
     const forward = new BABYLON.Vector3(Math.sin(camera.alpha+Math.PI),0,Math.cos(camera.alpha+Math.PI));
-    const right   = new BABYLON.Vector3(forward.z,0,-forward.x);
+    const right = new BABYLON.Vector3(forward.z,0,-forward.x);
 
     let dir = BABYLON.Vector3.Zero();
     if(input.forward) dir.addInPlace(forward);
-    if(input.back)    dir.subtractInPlace(forward);
-    if(input.left)    dir.subtractInPlace(right);
-    if(input.right)   dir.addInPlace(right);
+    if(input.back) dir.subtractInPlace(forward);
+    if(input.left) dir.subtractInPlace(right);
+    if(input.right) dir.addInPlace(right);
 
     if(dir.lengthSquared()>0.001){
       dir.normalize();
       lastMove.copyFrom(dir);
-    }
-
-    const v = sphere.physicsImpostor.getLinearVelocity();
-    const damped = new BABYLON.Vector3(v.x*SETTINGS.damp, v.y, v.z*SETTINGS.damp);
-
-    if(dir.length()>0.001){
-      sphere.physicsImpostor.setLinearVelocity(
-        clampVel(damped.add(dir.scale(SETTINGS.moveForce * engine.getDeltaTime()*0.06)))
-      );
-    } else {
-      sphere.physicsImpostor.setLinearVelocity(new BABYLON.Vector3(damped.x,v.y,damped.z));
+      // Apply impulse for sphere rolling
+      const impulse = dir.scale(SETTINGS.moveForce * engine.getDeltaTime()*0.03);
+      sphere.physicsImpostor.applyImpulse(impulse, sphere.getAbsolutePosition());
     }
 
     if(input.jump && grounded()){
+      const v = sphere.physicsImpostor.getLinearVelocity();
       sphere.physicsImpostor.setLinearVelocity(new BABYLON.Vector3(v.x,SETTINGS.jumpForce,v.z));
     }
+
+    clampHorizontalSpeed();
 
     if(sphere.position.y < SETTINGS.respawnY){
       sphere.position.set(0,6,0);
@@ -252,7 +233,7 @@ function createScene() {
 
     for(const c of cubes){
       if(c.mesh.position.y < SETTINGS.respawnY){
-        c.mesh.position.set(c.x, c.y, c.z);
+        c.mesh.position.set(c.x,c.y,c.z);
         c.mesh.physicsImpostor.setLinearVelocity(BABYLON.Vector3.Zero());
         c.mesh.physicsImpostor.setAngularVelocity(BABYLON.Vector3.Zero());
       }
@@ -260,9 +241,10 @@ function createScene() {
 
     if(!manualCam){
       const desired = Math.atan2(lastMove.x,lastMove.z);
-      camera.alpha = BABYLON.Scalar.Lerp(camera.alpha, desired, 0.18);
+      camera.alpha = BABYLON.Scalar.Lerp(camera.alpha,desired,0.18);
     }
-    camera.target = BABYLON.Vector3.Lerp(camera.target, sphere.position, 0.28);
+
+    camera.target = BABYLON.Vector3.Lerp(camera.target, sphere.position,0.28);
 
     // Update camera angle display
     let angleDeg = (camera.alpha*180/Math.PI)%360;
@@ -273,12 +255,9 @@ function createScene() {
   return scene;
 }
 
-/* ============================================================
-   START ENGINE
-============================================================ */
 const scene = createScene();
-engine.runRenderLoop(() => scene.render());
-window.addEventListener("resize", () => engine.resize());
+engine.runRenderLoop(()=>scene.render());
+window.addEventListener("resize",()=>engine.resize());
 </script>
 </body>
 </html>
