@@ -105,44 +105,57 @@ function createScene() {
 
   scene.enablePhysics(new BABYLON.Vector3(0, -9.81, 0), new BABYLON.CannonJSPlugin());
 
-  /* ============================================================
-     SOLID GROUND BOX (brown sides + green top)
+/* ============================================================
+   SOLID GROUND BOX (brown sides + green top)
 ============================================================ */
-  const ground = BABYLON.MeshBuilder.CreateBox("ground", {
-    width: 300,
-    height: 10,
-    depth: 300
-  }, scene);
+const ground = BABYLON.MeshBuilder.CreateBox("ground", {
+  width: 300,
+  height: 10,
+  depth: 300
+}, scene);
 
-  ground.position.y = -5;
+ground.position.y = -5;
 
-  const gMat = new BABYLON.StandardMaterial("gMat", scene);
+// Multi-material (top = green, sides = brown)
+const matTop = new BABYLON.StandardMaterial("matTop", scene);
+matTop.diffuseColor = BABYLON.Color3.FromHexString(SETTINGS.groundTopColor);
 
-  // texture with two colors baked by UV
-  const tex = new BABYLON.DynamicTexture("groundTex", {width:512,height:512}, scene);
-  const ctx = tex.getContext();
+const matSide = new BABYLON.StandardMaterial("matSide", scene);
+matSide.diffuseColor = BABYLON.Color3.FromHexString(SETTINGS.groundSideColor);
 
-  // paint texture:
-  // top 200px = green
-  ctx.fillStyle = SETTINGS.groundTopColor;
-  ctx.fillRect(0,0,512,256);
+// assign materials
+const multi = new BABYLON.MultiMaterial("groundMulti", scene);
+multi.subMaterials = [
+  matSide, // 0
+  matSide, // 1
+  matSide, // 2
+  matSide, // 3
+  matTop,  // 4  <-- top face
+  matSide  // 5 (bottom)
+];
+ground.material = multi;
 
-  // bottom = brown
-  ctx.fillStyle = SETTINGS.groundSideColor;
-  ctx.fillRect(0,256,512,512);
+// assign submeshes to faces
+ground.subMeshes = [];
+const faces = 6;
+const vertices = ground.getTotalVertices();
+const indices = ground.getIndices();
 
-  tex.update();
-  gMat.diffuseTexture = tex;
-  gMat.specularColor = BABYLON.Color3.Black();
-
-  ground.material = gMat;
-
-  ground.physicsImpostor = new BABYLON.PhysicsImpostor(
-    ground,
-    BABYLON.PhysicsImpostor.BoxImpostor,
-    { mass:0, friction:2, restitution:0 },
-    scene
+let indexStart = 0;
+for (let f = 0; f < faces; f++) {
+  const indexCount = 6; // each face = 2 triangles = 6 indices
+  new BABYLON.SubMesh(
+    f, 0, vertices, indexStart, indexCount, ground
   );
+  indexStart += indexCount;
+}
+
+ground.physicsImpostor = new BABYLON.PhysicsImpostor(
+  ground,
+  BABYLON.PhysicsImpostor.BoxImpostor,
+  { mass: 0, friction: 2, restitution: 0 },
+  scene
+);
 
   /* ============================================================
      WATER
