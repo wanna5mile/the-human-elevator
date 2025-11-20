@@ -94,9 +94,14 @@ function createScene() {
   };
 
   scene.registerBeforeRender(()=>{
-    // Move forward only
+    // Move towards camera forward
     if(input.forward){
-      const forward = new BABYLON.Vector3(Math.sin(camera.alpha+Math.PI),0,Math.cos(camera.alpha+Math.PI));
+      // camera's forward direction in XZ plane
+      const forward = new BABYLON.Vector3(
+        Math.sin(camera.alpha + Math.PI),
+        0,
+        Math.cos(camera.alpha + Math.PI)
+      );
       const impulse = forward.scale(SETTINGS.moveForce * engine.getDeltaTime()*0.03);
       sphere.physicsImpostor.applyImpulse(impulse, sphere.getAbsolutePosition());
     } else {
