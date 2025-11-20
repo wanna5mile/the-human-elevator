@@ -37,7 +37,7 @@ const SETTINGS = {
   moveForce:   18,
   maxSpeed:    8,
   jumpForce:   6.2,
-  damp:        0.95, // stronger damping for natural slowdown
+  damp:        0.95, // damping when no keys pressed
   coatTexture: "box-texture.png",
   coatSize:    2.04,
   cubeSize:    2,
@@ -142,7 +142,8 @@ function createScene() {
   // Camera
   const camera = new BABYLON.ArcRotateCamera("cam",0,BABYLON.Tools.ToRadians(55),18,sphere.position.clone(),scene);
   camera.attachControl(canvas,true);
-  camera.lowerRadiusLimit=6; camera.upperRadiusLimit=40; camera.wheelDeltaPercentage=0.01;
+  camera.lowerRadiusLimit=6; camera.upperRadiusLimit=40; 
+  camera.wheelDeltaPercentage=0.01;
 
   let manualCam=false,lastManual=0;
   const CAM_TIMEOUT = 1500;
@@ -179,7 +180,6 @@ function createScene() {
 
   // Game loop
   const rayDown = new BABYLON.Vector3(0,-1,0);
-  let lastMove = new BABYLON.Vector3(0,0,1);
 
   const grounded = () => {
     const ray = new BABYLON.Ray(sphere.position, rayDown, 1.15);
@@ -212,11 +212,11 @@ function createScene() {
 
     if(dir.lengthSquared()>0.001){
       dir.normalize();
-      lastMove.copyFrom(dir);
+      // Always move relative to camera direction
       const impulse = dir.scale(SETTINGS.moveForce * engine.getDeltaTime()*0.03);
       sphere.physicsImpostor.applyImpulse(impulse, sphere.getAbsolutePosition());
     } else {
-      // Apply slowdown damping when no keys pressed
+      // Slowdown when no input
       const v = sphere.physicsImpostor.getLinearVelocity();
       sphere.physicsImpostor.setLinearVelocity(new BABYLON.Vector3(v.x*SETTINGS.damp, v.y, v.z*SETTINGS.damp));
     }
@@ -241,11 +241,7 @@ function createScene() {
       }
     }
 
-    if(!manualCam){
-      const desired = Math.atan2(lastMove.x,lastMove.z);
-      camera.alpha = BABYLON.Scalar.Lerp(camera.alpha,desired,0.18);
-    }
-
+    // Camera follows the sphere
     camera.target = BABYLON.Vector3.Lerp(camera.target, sphere.position,0.28);
 
     let angleDeg = (camera.alpha*180/Math.PI)%360;
