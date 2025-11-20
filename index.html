@@ -11,14 +11,11 @@
 
   <!-- Babylon -->
   <script src="https://cdn.babylonjs.com/babylon.js"></script>
-
   <!-- Water Material -->
   <script src="https://cdn.babylonjs.com/materialsLibrary/babylon.waterMaterial.min.js"></script>
-
   <!-- Earcut -->
   <script src="https://cdn.babylonjs.com/earcut.min.js"></script>
-
-  <!-- Physics -->
+  <!-- Physics (Cannon) -->
   <script src="https://cdn.babylonjs.com/cannon.js"></script>
 </head>
 <body>
@@ -38,11 +35,12 @@ const SETTINGS = {
   skyColor:        "#9DE9FF",
 
   cubeCount: 30,
-  respawnY: -25,
+  hillCount: 10,
+  respawnY: -60,
 
   moveForce: 7.5,
   maxSpeed:  8,
-  jumpForce: 6.2,
+  jumpForce: 6.6,
   damp: 0.92,
 
   coatTexture: "box-texture.png",
@@ -50,8 +48,17 @@ const SETTINGS = {
   cubeSize:    2,
   safeRadius:  8,
 
-  swimUpSpeed: 4
+  swimUpSpeed: 4,
+  coinMax: 32,
+  coinRespawnSec: 45
 };
+
+// 3 spawn zones (where blocks can't spawn). Each spawn zone also acts as a "save zone".
+const SPAWN_ZONES = [
+  { x: 0,  z: 0,  r: 12 },
+  { x: 60, z: 40, r: 12 },
+  { x: -60,z: -40,r: 12 }
+];
 
 const RAMPS = [
   { x: 20,  z: 20,  rotY: 0 },
@@ -59,8 +66,13 @@ const RAMPS = [
   { x: 40,  z: -40, rotY: Math.PI/3 }
 ];
 
+/* helper */
+function rndRange(min,max){ return Math.random()*(max-min)+min; }
+function dist2(a,b){ const dx=a.x-b.x, dz=a.z-b.z; return Math.hypot(dx,dz); }
+
 /* ============================================================
    TRIANGULAR RAMP
+   (uses Vector2 shape for ExtrudePolygon)
 ============================================================ */
 function makeTriRamp(scene) {
   const shape = [
@@ -69,7 +81,6 @@ function makeTriRamp(scene) {
     new BABYLON.Vector2(10,6),
     new BABYLON.Vector2(0,6)
   ];
-
   const depth = 4;
 
   const ramp = BABYLON.MeshBuilder.ExtrudePolygon(
@@ -78,6 +89,7 @@ function makeTriRamp(scene) {
     scene
   );
 
+  // rotate so the ramp faces upward nicely
   ramp.rotation.x = -Math.atan2(depth, 6);
 
   const m = new BABYLON.StandardMaterial("rampMat", scene);
@@ -85,284 +97,385 @@ function makeTriRamp(scene) {
   ramp.material = m;
 
   ramp.physicsImpostor = new BABYLON.PhysicsImpostor(
-    ramp,
-    BABYLON.PhysicsImpostor.MeshImpostor,
-    { mass: 0, friction: 1, restitution: 0 },
-    scene
+    ramp, BABYLON.PhysicsImpostor.MeshImpostor,
+    { mass:0, friction:1, restitution:0 }, scene
   );
 
   return ramp;
 }
 
 /* ============================================================
-   CREATE SCENE
+   Create scene (main)
 ============================================================ */
-function createScene() {
+function createScene(){
   const scene = new BABYLON.Scene(engine);
   scene.clearColor = BABYLON.Color3.FromHexString(SETTINGS.skyColor);
 
   new BABYLON.HemisphericLight("light", new BABYLON.Vector3(0,1,0), scene);
-
   scene.enablePhysics(new BABYLON.Vector3(0, -9.81, 0), new BABYLON.CannonJSPlugin());
 
-/* ============================================================
-   SOLID GROUND BOX
-============================================================ */
-const ground = BABYLON.MeshBuilder.CreateBox("ground", {
-  width: 300,
-  height: 10,
-  depth: 300
-}, scene);
-
-ground.position.y = -5;
-
-const matTop = new BABYLON.StandardMaterial("matTop", scene);
-matTop.diffuseColor = BABYLON.Color3.FromHexString(SETTINGS.groundTopColor);
-
-const matSide = new BABYLON.StandardMaterial("matSide", scene);
-matSide.diffuseColor = BABYLON.Color3.FromHexString(SETTINGS.groundSideColor);
-
-const multi = new BABYLON.MultiMaterial("groundMulti", scene);
-multi.subMaterials = [matSide,matSide,matSide,matSide,matTop,matSide];
-ground.material = multi;
-
-ground.subMeshes = [];
-const vertices = ground.getTotalVertices();
-let indexStart = 0;
-for (let f = 0; f < 6; f++) {
-  new BABYLON.SubMesh(f, 0, vertices, indexStart, 6, ground);
-  indexStart += 6;
-}
-
-ground.physicsImpostor = new BABYLON.PhysicsImpostor(
-  ground,
-  BABYLON.PhysicsImpostor.BoxImpostor,
-  { mass: 0, friction: 2, restitution: 0 },
-  scene
-);
-
-/* ============================================================
-   WATER
-============================================================ */
-const water = BABYLON.MeshBuilder.CreateGround("water", {
-  width: 700,
-  height: 700
-}, scene);
-
-water.position.y = -6.5;
-
-const waterMat = new BABYLON.WaterMaterial("waterMat", scene);
-waterMat.waveHeight = 0.4;
-waterMat.windForce = 3;
-waterMat.waterColor = new BABYLON.Color3.FromHexString(SETTINGS.waterColor);
-
-water.material = waterMat;
-waterMat.addToRenderList(ground);
-
-/* ============================================================
-   PLAYER SPHERE
-============================================================ */
-const sphere = BABYLON.MeshBuilder.CreateSphere("player", { diameter:2 }, scene);
-sphere.position.set(0,3,0);
-
-const sphereMat = new BABYLON.StandardMaterial("sphereMat", scene);
-sphereMat.diffuseColor = BABYLON.Color3.Random();
-sphere.material = sphereMat;
-
-sphere.physicsImpostor = new BABYLON.PhysicsImpostor(
-  sphere,
-  BABYLON.PhysicsImpostor.SphereImpostor,
-  { mass:1, friction:0.6, restitution:0.05 },
-  scene
-);
-
-/* ============================================================
-   TRI RAMP SPAWN (FIXED Y POSITION)
-============================================================ */
-const ramps = RAMPS.map(r=>{
-  const ramp = makeTriRamp(scene);
-  ramp.position.set(r.x, 0.1, r.z); // FIX: sits on ground, never inside
-  ramp.rotation.y = r.rotY;
-  return ramp;
-});
-
-function onRampBoost() {
-  const v = sphere.physicsImpostor.getLinearVelocity();
-  sphere.physicsImpostor.setLinearVelocity(new BABYLON.Vector3(v.x, 10, v.z));
-}
-
-/* ============================================================
-   RANDOM CUBES (RESTORED)
-============================================================ */
-const cubes = [];
-for (let i = 0; i < SETTINGS.cubeCount; i++) {
-  const c = BABYLON.MeshBuilder.CreateBox("cube" + i, {
-    size: SETTINGS.cubeSize
+  /* ---------------- GROUND (solid box) ---------------- */
+  const groundSize = 300;
+  const groundHeight = 10;
+  const ground = BABYLON.MeshBuilder.CreateBox("ground", {
+    width: groundSize, height: groundHeight, depth: groundSize
   }, scene);
+  ground.position.y = -groundHeight/2; // top at y=0
 
-  c.position.x = (Math.random() * 200 - 100);
-  c.position.z = (Math.random() * 200 - 100);
-  c.position.y = 1;
+  // multi-material: 4 sides = brown, top = green, bottom = brown
+  const matTop = new BABYLON.StandardMaterial("matTop", scene);
+  matTop.diffuseColor = BABYLON.Color3.FromHexString(SETTINGS.groundTopColor);
+  const matSide = new BABYLON.StandardMaterial("matSide", scene);
+  matSide.diffuseColor = BABYLON.Color3.FromHexString(SETTINGS.groundSideColor);
+  const multi = new BABYLON.MultiMaterial("groundMulti", scene);
+  multi.subMaterials = [matSide, matSide, matSide, matSide, matTop, matSide];
+  ground.material = multi;
 
-  const m = new BABYLON.StandardMaterial("cubeMat" + i, scene);
-  m.diffuseColor = BABYLON.Color3.Random();
-  c.material = m;
+  // assign submeshes (each face = 6 indices)
+  ground.subMeshes = [];
+  const vertices = ground.getTotalVertices();
+  let indexStart = 0;
+  for(let f=0; f<6; f++){
+    new BABYLON.SubMesh(f, 0, vertices, indexStart, 6, ground);
+    indexStart += 6;
+  }
 
-  c.physicsImpostor = new BABYLON.PhysicsImpostor(
-    c,
-    BABYLON.PhysicsImpostor.BoxImpostor,
-    { mass: 0, friction: 0.7, restitution: 0.1 },
-    scene
+  ground.physicsImpostor = new BABYLON.PhysicsImpostor(
+    ground, BABYLON.PhysicsImpostor.BoxImpostor,
+    { mass:0, friction:2, restitution:0 }, scene
   );
 
-  cubes.push(c);
-}
+  /* ---------------- WATER (raised a bit) ---------------- */
+  const water = BABYLON.MeshBuilder.CreateGround("water", {
+    width: 700, height: 700
+  }, scene);
+  water.position.y = -4.2; // raised so you can jump in/out cleanly
 
-/* ============================================================
-   MOVEMENT ARROWS (RESTORED)
-============================================================ */
-const arrowMat = new BABYLON.StandardMaterial("arrowMat", scene);
-arrowMat.diffuseColor = BABYLON.Color3.White();
+  const waterMat = new BABYLON.WaterMaterial("waterMat", scene);
+  waterMat.waveHeight = 0.35;
+  waterMat.bumpHeight = 0.07;
+  waterMat.windForce = 3.0;
+  waterMat.waterColor = new BABYLON.Color3.FromHexString(SETTINGS.waterColor);
+  water.material = waterMat;
+  // ensure it renders ground and ramps
+  waterMat.addToRenderList(ground);
 
-function makeArrow(name, angle, x, z) {
-  const p = BABYLON.MeshBuilder.CreatePlane(name, { size: 1 }, scene);
-  p.rotation.x = -Math.PI / 2;
-  p.rotation.y = angle;
-  p.position.set(x, 0.05, z);
-  p.material = arrowMat;
-  return p;
-}
+  /* ---------------- PLAYER SPHERE ---------------- */
+  const sphere = BABYLON.MeshBuilder.CreateSphere("player", { diameter:2 }, scene);
+  sphere.position.set(0,3,0);
+  const sphereMat = new BABYLON.StandardMaterial("sphereMat", scene);
+  sphereMat.diffuseColor = BABYLON.Color3.Random();
+  sphere.material = sphereMat;
+  sphere.physicsImpostor = new BABYLON.PhysicsImpostor(
+    sphere, BABYLON.PhysicsImpostor.SphereImpostor,
+    { mass:1, friction:0.6, restitution:0.05 }, scene
+  );
 
-const arrows = {
-  w: makeArrow("arrowW", 0,       0,  2),
-  s: makeArrow("arrowS", Math.PI, 0, -2),
-  d: makeArrow("arrowD", Math.PI/2,  2, 0),
-  a: makeArrow("arrowA", -Math.PI/2, -2, 0)
-};
-
-/* ============================================================
-   INPUT
-============================================================ */
-const input = {forward:false,back:false,left:false,right:false,jump:false};
-window.addEventListener("keydown", e=>{
-  const k=e.key.toLowerCase();
-  if(k==="w")input.forward=true;
-  if(k==="s")input.back=true;
-  if(k==="a")input.left=true;
-  if(k==="d")input.right=true;
-  if(k===" ")input.jump=true;
-});
-window.addEventListener("keyup", e=>{
-  const k=e.key.toLowerCase();
-  if(k==="w")input.forward=false;
-  if(k==="s")input.back=false;
-  if(k==="a")input.left=false;
-  if(k==="d")input.right=false;
-  if(k===" ")input.jump=false;
-});
-
-/* ============================================================
-   CAMERA
-============================================================ */
-const camera = new BABYLON.ArcRotateCamera(
-  "cam",
-  0,
-  BABYLON.Tools.ToRadians(55),
-  12,
-  sphere.position.clone(),
-  scene
-);
-camera.attachControl(canvas,true);
-
-/* ============================================================
-   GAME LOOP
-============================================================ */
-let lastMove = new BABYLON.Vector3(0,0,1);
-const worldForward = new BABYLON.Vector3(0,0,1);
-const worldRight   = new BABYLON.Vector3(1,0,0);
-
-function grounded(){
-  const ray = new BABYLON.Ray(sphere.position, new BABYLON.Vector3(0,-1,0), 1.2);
-  const hit = scene.pickWithRay(ray, m=>m!==sphere);
-  return hit && hit.hit;
-}
-
-function clampVel(v){
-  const h = new BABYLON.Vector3(v.x,0,v.z);
-  const l = h.length();
-  if(l > SETTINGS.maxSpeed){
-    h.scaleInPlace(SETTINGS.maxSpeed/l);
-    return new BABYLON.Vector3(h.x,v.y,h.z);
-  }
-  return v;
-}
-
-scene.registerBeforeRender(()=>{
-  let dir = BABYLON.Vector3.Zero();
-  if(input.forward) dir.addInPlace(worldForward);
-  if(input.back)    dir.subtractInPlace(worldForward);
-  if(input.left)    dir.subtractInPlace(worldRight);
-  if(input.right)   dir.addInPlace(worldRight);
-
-  if(dir.lengthSquared()>0.001){
-    dir.normalize();
-    lastMove.copyFrom(dir);
+  /* ---------------- TRIANGULAR RAMPS (lifted) ---------------- */
+  const ramps = RAMPS.map(r=>{
+    const ramp = makeTriRamp(scene);
+    ramp.position.set(r.x, 1.8, r.z); // LIFTED MORE so it sits well above ground
+    ramp.rotation.y = r.rotY;
+    return ramp;
+  });
+  function onRampBoost(){
+    const v = sphere.physicsImpostor.getLinearVelocity();
+    // stronger vertical boost + small forward impulse along ramp normal
+    sphere.physicsImpostor.setLinearVelocity(new BABYLON.Vector3(v.x, 12, v.z));
   }
 
-  const v = sphere.physicsImpostor.getLinearVelocity();
-  const damped = new BABYLON.Vector3(v.x*SETTINGS.damp, v.y, v.z*SETTINGS.damp);
+  /* ------------------------------------------------------
+     Helper: check if a location (x,z) is inside any spawn zone
+  ------------------------------------------------------ */
+  function insideAnySpawnZone(x,z){
+    for(const s of SPAWN_ZONES){
+      if(Math.hypot(x - s.x, z - s.z) < s.r) return true;
+    }
+    return false;
+  }
 
-  if(dir.length()>0.001){
-    sphere.physicsImpostor.setLinearVelocity(
-      clampVel(damped.add(dir.scale(SETTINGS.moveForce * engine.getDeltaTime()*0.06)))
+  /* ----------------- RANDOM CUBES (small obstacles) ----------------- */
+  const cubes = [];
+  for (let i=0;i<SETTINGS.cubeCount;i++){
+    // find a spawn that is not inside spawn zones and not too near origin
+    let x,z;
+    let tries = 0;
+    do {
+      x = rndRange(-groundSize/2 + 8, groundSize/2 - 8);
+      z = rndRange(-groundSize/2 + 8, groundSize/2 - 8);
+      tries++;
+    } while((Math.hypot(x,z) < SETTINGS.safeRadius || insideAnySpawnZone(x,z)) && tries < 300);
+
+    const b = BABYLON.MeshBuilder.CreateBox("cube"+i,{size:SETTINGS.cubeSize},scene);
+    b.position.set(x, SETTINGS.cubeSize/2 + 0.1, z);
+    const m = new BABYLON.StandardMaterial("cubeMat"+i, scene);
+    m.diffuseColor = BABYLON.Color3.Random();
+    b.material = m;
+    b.physicsImpostor = new BABYLON.PhysicsImpostor(
+      b, BABYLON.PhysicsImpostor.BoxImpostor,
+      { mass:1, friction:1, restitution:0.05 }, scene
     );
-  } else {
-    sphere.physicsImpostor.setLinearVelocity(new BABYLON.Vector3(damped.x,v.y,damped.z));
+    cubes.push(b);
   }
 
-  /* JUMP (RESTORED) */
-  if(input.jump && grounded()){
-    const v2 = sphere.physicsImpostor.getLinearVelocity();
-    sphere.physicsImpostor.setLinearVelocity(new BABYLON.Vector3(v2.x, SETTINGS.jumpForce, v2.z));
-  }
+  /* ----------------- HILL CUBES (bigger, styled like ground) ----------------- */
+  const hills = [];
+  const hillCount = SETTINGS.hillCount;
+  for(let i=0;i<hillCount;i++){
+    let x,z,tries=0;
+    do {
+      x = rndRange(-groundSize/2 + 20, groundSize/2 - 20);
+      z = rndRange(-groundSize/2 + 20, groundSize/2 - 20);
+      tries++;
+    } while((Math.hypot(x,z) < SETTINGS.safeRadius || insideAnySpawnZone(x,z)) && tries < 500);
 
-  /* SWIM */
-  if(sphere.position.y < water.position.y + 1){
-    sphere.physicsImpostor.setLinearVelocity(
-      new BABYLON.Vector3(v.x*0.9, v.y+0.08, v.z*0.9)
+    const size = rndRange(6, 16);
+    const hill = BABYLON.MeshBuilder.CreateBox("hill"+i, { width:size, height:size/2, depth:size }, scene);
+    hill.position.set(x, size/4 + 0.1, z);
+
+    // style like ground: MultiMaterial top and sides
+    const topMat = new BABYLON.StandardMaterial("hillTop"+i, scene);
+    topMat.diffuseColor = BABYLON.Color3.FromHexString(SETTINGS.groundTopColor);
+    const sideMat = new BABYLON.StandardMaterial("hillSide"+i, scene);
+    sideMat.diffuseColor = BABYLON.Color3.FromHexString(SETTINGS.groundSideColor);
+    const hm = new BABYLON.MultiMaterial("hillMulti"+i, scene);
+    hm.subMaterials = [sideMat,sideMat,sideMat,sideMat,topMat,sideMat];
+    hill.material = hm;
+
+    // assign submeshes for hill faces
+    hill.subMeshes = [];
+    const vcount = hill.getTotalVertices();
+    let idxStart = 0;
+    for(let f=0; f<6; f++){
+      new BABYLON.SubMesh(f, 0, vcount, idxStart, 6, hill);
+      idxStart+=6;
+    }
+
+    hill.physicsImpostor = new BABYLON.PhysicsImpostor(
+      hill, BABYLON.PhysicsImpostor.BoxImpostor,
+      { mass:0, friction:1, restitution:0 }, scene
     );
-    if(input.jump){
+    hills.push(hill);
+  }
+
+  /* ----------------- ARROWS (visual) ----------------- */
+  function makeArrow(name,color){
+    const p = BABYLON.MeshBuilder.CreatePlane(name,{size:1},scene);
+    const mm = new BABYLON.StandardMaterial(name+"Mat",scene);
+    mm.diffuseColor = BABYLON.Color3.FromHexString(color);
+    p.material = mm;
+    p.billboardMode = BABYLON.Mesh.BILLBOARDMODE_ALL;
+    p.parent = sphere;
+    p.position.set(0,1.5,-2);
+    return p;
+  }
+  const arrowF = makeArrow("aF", "#00FF00");
+  const arrowB = (() => { const a=makeArrow("aB","#FF0000"); a.position.set(0,1.5,2); return a; })();
+  const arrowL = (() => { const a=makeArrow("aL","#00A2FF"); a.position.set(-2,1.5,0); return a; })();
+  const arrowR = (() => { const a=makeArrow("aR","#FFD800"); a.position.set(2,1.5,0); return a; })();
+
+  function updateArrows(i){
+    arrowF.material.emissiveColor = i.forward ? BABYLON.Color3.White() : BABYLON.Color3.Black();
+    arrowB.material.emissiveColor = i.back ? BABYLON.Color3.White() : BABYLON.Color3.Black();
+    arrowL.material.emissiveColor = i.left ? BABYLON.Color3.White() : BABYLON.Color3.Black();
+    arrowR.material.emissiveColor = i.right ? BABYLON.Color3.White() : BABYLON.Color3.Black();
+  }
+
+  /* ----------------- COINS ----------------- */
+  const coinMaterial = new BABYLON.StandardMaterial("coinMat", scene);
+  coinMaterial.diffuseColor = new BABYLON.Color3(0.95,0.77,0.15);
+  coinMaterial.emissiveColor = new BABYLON.Color3(0.7,0.5,0.05);
+
+  const coins = [];
+  const coinState = []; // { active: bool, timerId: number|null }
+  const coinRadius = 1.0;
+
+  function findSafeCoinPosition(){
+    // attempts to find a pos on ground avoiding spawn zones and other objects
+    const margin = 8;
+    const attempts = 300;
+    for(let i=0;i<attempts;i++){
+      const x = rndRange(-groundSize/2 + margin, groundSize/2 - margin);
+      const z = rndRange(-groundSize/2 + margin, groundSize/2 - margin);
+      // don't spawn too close to player start
+      if(Math.hypot(x, z) < SETTINGS.safeRadius*0.8) continue;
+      if(insideAnySpawnZone(x,z)) continue;
+      // avoid other coins
+      let ok = true;
+      for(const c of coins){
+        if(c && c.position && Math.hypot(c.position.x - x, c.position.z - z) < 3){ ok=false; break; }
+      }
+      if(!ok) continue;
+      return {x,z};
+    }
+    // fallback to center-ish
+    return {x: 10, z: 10};
+  }
+
+  function spawnSingleCoin(i){
+    let pos = findSafeCoinPosition();
+    if(!coins[i]){
+      const tor = BABYLON.MeshBuilder.CreateTorus("coin"+i, {thickness:0.2, diameter:1.0, tessellation:24}, scene);
+      tor.rotation.x = Math.PI/2;
+      tor.material = coinMaterial;
+      tor.position.y = 1.2;
+      coins[i] = tor;
+      coinState[i] = {active:true, timerId:null};
+    }
+    coins[i].position.x = pos.x;
+    coins[i].position.z = pos.z;
+    coins[i].isVisible = true;
+    coinState[i].active = true;
+  }
+
+  // spawn initial coins up to cap
+  const coinCap = SETTINGS.coinMax;
+  for(let i=0;i<coinCap;i++){
+    spawnSingleCoin(i);
+  }
+
+  function hideAndScheduleRespawn(i){
+    if(!coins[i]) return;
+    coins[i].isVisible = false;
+    coinState[i].active = false;
+    // schedule respawn in coinRespawnSec seconds at a new safe spot
+    const ms = SETTINGS.coinRespawnSec * 1000;
+    if(coinState[i].timerId) clearTimeout(coinState[i].timerId);
+    coinState[i].timerId = setTimeout(()=>{
+      spawnSingleCoin(i);
+      coinState[i].timerId = null;
+    }, ms);
+  }
+
+  /* ----------------- INPUT & CAMERA ----------------- */
+  const input = { forward:false, back:false, left:false, right:false, jump:false };
+  window.addEventListener("keydown", e=>{
+    const k = e.key.toLowerCase();
+    if(k==="w") input.forward=true;
+    if(k==="s") input.back=true;
+    if(k==="a") input.left=true;
+    if(k==="d") input.right=true;
+    if(e.code === "Space") input.jump = true;
+  });
+  window.addEventListener("keyup", e=>{
+    const k = e.key.toLowerCase();
+    if(k==="w") input.forward=false;
+    if(k==="s") input.back=false;
+    if(k==="a") input.left=false;
+    if(k==="d") input.right=false;
+    if(e.code === "Space") input.jump = false;
+  });
+
+  const camera = new BABYLON.ArcRotateCamera("cam", 0, BABYLON.Tools.ToRadians(55), 14, sphere.position.clone(), scene);
+  camera.attachControl(canvas, true);
+  camera.lowerRadiusLimit = 6;
+  camera.upperRadiusLimit = 40;
+
+  /* ============================================================
+     GAME LOOP (movement / swim / boost / coins)
+  ============================================================ */
+  let lastMove = new BABYLON.Vector3(0,0,1);
+  const worldForward = new BABYLON.Vector3(0,0,1);
+  const worldRight   = new BABYLON.Vector3(1,0,0);
+
+  function grounded(){
+    const ray = new BABYLON.Ray(sphere.position, new BABYLON.Vector3(0,-1,0), 1.2);
+    const hit = scene.pickWithRay(ray, m => m !== sphere);
+    return hit && hit.hit;
+  }
+
+  function clampVel(v){
+    const h = new BABYLON.Vector3(v.x,0,v.z);
+    const l = h.length();
+    if(l > SETTINGS.maxSpeed){
+      h.scaleInPlace(SETTINGS.maxSpeed/l);
+      return new BABYLON.Vector3(h.x, v.y, h.z);
+    }
+    return v;
+  }
+
+  scene.registerBeforeRender(()=>{
+    updateArrows(input);
+
+    // movement dir (world-space)
+    let dir = BABYLON.Vector3.Zero();
+    if(input.forward) dir.addInPlace(worldForward);
+    if(input.back)    dir.subtractInPlace(worldForward);
+    if(input.left)    dir.subtractInPlace(worldRight);
+    if(input.right)   dir.addInPlace(worldRight);
+
+    if(dir.lengthSquared() > 0.001){
+      dir.normalize();
+      lastMove.copyFrom(dir);
+    }
+
+    // physics velocity & damping
+    const v = sphere.physicsImpostor.getLinearVelocity();
+    const damped = new BABYLON.Vector3(v.x*SETTINGS.damp, v.y, v.z*SETTINGS.damp);
+
+    if(dir.length()>0.001){
       sphere.physicsImpostor.setLinearVelocity(
-        new BABYLON.Vector3(v.x, SETTINGS.swimUpSpeed, v.z)
+        clampVel(damped.add(dir.scale(SETTINGS.moveForce * engine.getDeltaTime()*0.06)))
       );
+    } else {
+      sphere.physicsImpostor.setLinearVelocity(new BABYLON.Vector3(damped.x, v.y, damped.z));
     }
-  }
 
-  /* RAMP BOOST */
-  for(const ramp of ramps){
-    if(BABYLON.Vector3.Distance(sphere.position, ramp.position) < 6){
-      onRampBoost();
+    // jump (on ground)
+    if(input.jump && grounded()){
+      const v2 = sphere.physicsImpostor.getLinearVelocity();
+      sphere.physicsImpostor.setLinearVelocity(new BABYLON.Vector3(v2.x, SETTINGS.jumpForce, v2.z));
     }
-  }
 
-  /* RESPAWN */
-  if(sphere.position.y < SETTINGS.respawnY){
-    sphere.position.set(0,6,0);
-    sphere.physicsImpostor.setLinearVelocity(BABYLON.Vector3.Zero());
-  }
+    // swim behaviour (if under water surface)
+    const swimThreshold = water.position.y + 1.2;
+    if(sphere.position.y < swimThreshold){
+      // buoyancy
+      sphere.physicsImpostor.setLinearVelocity(
+        new BABYLON.Vector3(v.x * 0.9, v.y + 0.08, v.z * 0.9)
+      );
+      if(input.jump){
+        sphere.physicsImpostor.setLinearVelocity(new BABYLON.Vector3(v.x, SETTINGS.swimUpSpeed, v.z));
+      }
+    }
 
-  /* CAMERA FOLLOW */
-  camera.target = BABYLON.Vector3.Lerp(camera.target, sphere.position, 0.35);
-});
+    // ramp boost detection (distance from ramp position)
+    for(const ramp of ramps){
+      if(BABYLON.Vector3.Distance(sphere.position, ramp.position) < 6){
+        onRampBoost();
+      }
+    }
 
-return scene;
+    // coin pickup detection
+    for(let i=0;i<coins.length;i++){
+      const coin = coins[i];
+      if(!coin || !coin.isVisible) continue;
+      const d = Math.hypot(coin.position.x - sphere.position.x, coin.position.z - sphere.position.z);
+      if(d < 1.3){
+        // picked up
+        hideAndScheduleRespawn(i);
+      }
+    }
+
+    // respawn safeguards
+    if(sphere.position.y < SETTINGS.respawnY){
+      sphere.position.set(0,6,0);
+      sphere.physicsImpostor.setLinearVelocity(BABYLON.Vector3.Zero());
+    }
+
+    // camera follow
+    camera.target = BABYLON.Vector3.Lerp(camera.target, sphere.position, 0.35);
+  });
+
+  return scene;
 }
+
 
 /* ============================================================
    START ENGINE
 ============================================================ */
 const scene = createScene();
-engine.runRenderLoop(() => scene.render());
+engine.runRenderLoop(()=> scene.render());
 window.addEventListener("resize", () => engine.resize());
 </script>
 </body>
