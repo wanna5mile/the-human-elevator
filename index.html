@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>Babylon — 3rd Person Sphere</title>
+  <title>A World Of Dice & Spheres by Rhap5ody.</title>
   <style>
     html,body { width:100%; height:100%; margin:0; overflow:hidden; }
     #renderCanvas { width:100%; height:100%; touch-action:none; display:block; }
@@ -148,14 +148,12 @@ function createScene() {
   const sharedCoatTexture = new BABYLON.Texture(SETTINGS.coatTexture, scene);
 
   function spawnCube(x,z,y) {
-    // base cube = pure color
     const base = BABYLON.MeshBuilder.CreateBox("cube",{size:SETTINGS.cubeSize}, scene);
     const bMat = new BABYLON.StandardMaterial("bMat", scene);
     bMat.diffuseColor = BABYLON.Color3.Random();
     bMat.specularColor = BABYLON.Color3.Black();
     base.material = bMat;
 
-    // coat = slightly larger + texture
     const coat = BABYLON.MeshBuilder.CreateBox("coat",{size:SETTINGS.coatSize}, scene);
     const cMat = new BABYLON.StandardMaterial("cMat", scene);
     cMat.diffuseTexture = sharedCoatTexture;
@@ -187,16 +185,20 @@ function createScene() {
   }
 
   /* ============================================================
-     CAMERA
+     CAMERA (3RD PERSON FOLLOW)
   ============================================================ */
   const camera = new BABYLON.ArcRotateCamera(
-    "cam", 0, BABYLON.Tools.ToRadians(55), 18,
-    sphere.position.clone(), scene
+    "cam", 
+    0, 
+    BABYLON.Tools.ToRadians(55), 
+    12,                 // closer follow distance
+    sphere.position.clone(), 
+    scene
   );
 
   camera.attachControl(canvas,true);
   camera.lowerRadiusLimit = 6;
-  camera.upperRadiusLimit = 40;
+  camera.upperRadiusLimit = 25;
   camera.wheelDeltaPercentage = 0.01;
 
   let manualCam = false;
@@ -239,8 +241,8 @@ function createScene() {
   });
 
   /* ============================================================
-     GAME LOOP
-  ============================================================ */
+     GAME LOOP — USING LOGIC A
+============================================================ */
   let lastMove = new BABYLON.Vector3(0,0,1);
   const rayDown = new BABYLON.Vector3(0,-1,0);
 
@@ -260,6 +262,10 @@ function createScene() {
     return v;
   };
 
+  // WORLD-SPACE DIRECTIONS (NOT CAMERA DEPENDENT!)
+  const worldForward = new BABYLON.Vector3(0,0,1);
+  const worldRight   = new BABYLON.Vector3(1,0,0);
+
   scene.registerBeforeRender(()=>{
     updateArrows(input);
 
@@ -267,22 +273,18 @@ function createScene() {
       manualCam=false;
     }
 
-    // camera-relative forward vector
-    const camA = camera.alpha;
-    const forward = new BABYLON.Vector3(Math.sin(camA+Math.PI),0,Math.cos(camA+Math.PI));
-    const right   = new BABYLON.Vector3(forward.z,0,-forward.x);
-
     let dir = BABYLON.Vector3.Zero();
-    if(input.forward) dir.addInPlace(forward);
-    if(input.back)    dir.subtractInPlace(forward);
-    if(input.left)    dir.subtractInPlace(right);
-    if(input.right)   dir.addInPlace(right);
+    if(input.forward) dir.addInPlace(worldForward);
+    if(input.back)    dir.subtractInPlace(worldForward);
+    if(input.left)    dir.subtractInPlace(worldRight);
+    if(input.right)   dir.addInPlace(worldRight);
 
     if(dir.lengthSquared()>0.001){
       dir.normalize();
       lastMove.copyFrom(dir);
     }
 
+    // Physics + damping
     const v = sphere.physicsImpostor.getLinearVelocity();
     const damped = new BABYLON.Vector3(v.x*SETTINGS.damp, v.y, v.z*SETTINGS.damp);
 
@@ -298,11 +300,13 @@ function createScene() {
       sphere.physicsImpostor.setLinearVelocity(new BABYLON.Vector3(v.x,SETTINGS.jumpForce,v.z));
     }
 
+    // Respawn sphere
     if(sphere.position.y < SETTINGS.respawnY){
       sphere.position.set(0,6,0);
       sphere.physicsImpostor.setLinearVelocity(BABYLON.Vector3.Zero());
     }
 
+    // Respawn cubes
     for(const c of cubes){
       if(c.mesh.position.y < SETTINGS.respawnY){
         c.mesh.position.set(c.x, c.y, c.z);
@@ -311,12 +315,14 @@ function createScene() {
       }
     }
 
+    // Auto camera rotation toward movement
     if(!manualCam){
       const desired = Math.atan2(lastMove.x,lastMove.z);
-      camera.alpha = BABYLON.Scalar.Lerp(camera.alpha, desired, 0.18);
+      camera.alpha = BABYLON.Scalar.Lerp(camera.alpha, desired, 0.25);
     }
 
-    camera.target = BABYLON.Vector3.Lerp(camera.target, sphere.position, 0.28);
+    // Close follow target
+    camera.target = BABYLON.Vector3.Lerp(camera.target, sphere.position, 0.35);
   });
 
   return scene;
