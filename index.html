@@ -68,6 +68,38 @@ const createScene = () => {
     { mass: 1, friction: 0.6, restitution: 0.05 }, scene
   );
 
+  /* --------- ARROW VISUALIZERS --------- */
+  function makeArrow(name, colorHex) {
+    const arrow = BABYLON.MeshBuilder.CreatePlane(name, { size: 1.2 }, scene);
+    arrow.billboardMode = BABYLON.Mesh.BILLBOARDMODE_ALL;
+
+    const mat = new BABYLON.StandardMaterial(name + "mat", scene);
+    mat.diffuseColor = BABYLON.Color3.FromHexString(colorHex);
+    mat.emissiveColor = BABYLON.Color3.Black();
+    mat.alpha = 0.9;
+
+    arrow.material = mat;
+    arrow.parent = sphere;
+    return arrow;
+  }
+
+  const arrowForward = makeArrow("arrowForward", "#00FF00");
+  const arrowBack    = makeArrow("arrowBack", "#FF0000");
+  const arrowLeft    = makeArrow("arrowLeft", "#00A2FF");
+  const arrowRight   = makeArrow("arrowRight", "#FFD800");
+
+  arrowForward.position.set(0, 1.5, -2);
+  arrowBack.position.set(0, 1.5,  2);
+  arrowLeft.position.set(-2, 1.5, 0);
+  arrowRight.position.set( 2, 1.5, 0);
+
+  function updateArrows(input) {
+    arrowForward.material.emissiveColor = input.forward ? BABYLON.Color3.White() : BABYLON.Color3.Black();
+    arrowBack.material.emissiveColor    = input.back    ? BABYLON.Color3.White() : BABYLON.Color3.Black();
+    arrowLeft.material.emissiveColor    = input.left    ? BABYLON.Color3.White() : BABYLON.Color3.Black();
+    arrowRight.material.emissiveColor   = input.right   ? BABYLON.Color3.White() : BABYLON.Color3.Black();
+  }
+
   /* --------- Ramps --------- */
   function addRamp(d) {
     const ramp = BABYLON.MeshBuilder.CreateBox("ramp", {
@@ -89,30 +121,39 @@ const createScene = () => {
   }
   RAMP_DEFS.forEach(addRamp);
 
-  /* --------- Cubes --------- */
+  /* --------- Cubes with Outer Coat --------- */
   const cubes = [];
   const SAFE_RADIUS = 8;
 
   function spawnCube(x,z,y=8){
-    const c = BABYLON.MeshBuilder.CreateBox("cube",{size:2},scene);
 
-    // Random color + transparent overlay texture
-    const cm = new BABYLON.StandardMaterial("cubeMat", scene);
-    cm.diffuseColor = BABYLON.Color3.Random();  // base color
-    cm.diffuseTexture = new BABYLON.Texture("box-texture.png", scene);
-    cm.diffuseTexture.hasAlpha = true;
-    cm.useAlphaFromDiffuseTexture = true;
-    cm.specularColor = BABYLON.Color3.Black();
-    c.material = cm;
+    // Base cube — random color ONLY
+    const base = BABYLON.MeshBuilder.CreateBox("cubeBase",{size:2},scene);
+    const baseMat = new BABYLON.StandardMaterial("cubeBaseMat", scene);
+    baseMat.diffuseColor = BABYLON.Color3.Random();
+    baseMat.specularColor = BABYLON.Color3.Black();
+    base.material = baseMat;
 
-    c.position.set(x,y,z);
+    // Outer coat — slightly bigger + texture
+    const coat = BABYLON.MeshBuilder.CreateBox("cubeCoat",{size:2.04},scene);
+    const coatMat = new BABYLON.StandardMaterial("cubeCoatMat", scene);
+    coatMat.diffuseTexture = new BABYLON.Texture("box-texture.png", scene);
+    coatMat.diffuseTexture.hasAlpha = true;
+    coatMat.useAlphaFromDiffuseTexture = true;
+    coatMat.specularColor = BABYLON.Color3.Black();
+    coat.material = coatMat;
 
-    c.physicsImpostor = new BABYLON.PhysicsImpostor(
-      c, BABYLON.PhysicsImpostor.BoxImpostor,
+    // Make coat follow cube
+    coat.parent = base;
+
+    base.position.set(x,y,z);
+
+    base.physicsImpostor = new BABYLON.PhysicsImpostor(
+      base, BABYLON.PhysicsImpostor.BoxImpostor,
       { mass: 1, friction: 1, restitution: 0.05 }, scene
     );
 
-    cubes.push({mesh:c, spawnX:x, spawnY:y, spawnZ:z});
+    cubes.push({ mesh: base, spawnX:x, spawnY:y, spawnZ:z });
   }
 
   for (let i=0; i<CUBE_COUNT; i++) {
@@ -217,6 +258,8 @@ const createScene = () => {
   /* ---------------- GAME LOOP ---------------- */
   scene.registerBeforeRender(()=>{
 
+    updateArrows(input);
+
     // Expire manual camera rotation
     if(manualCamera && performance.now() - lastManual > MANUAL_TIMEOUT){
       manualCamera = false;
@@ -225,7 +268,6 @@ const createScene = () => {
     /* ---- Corrected camera-relative movement ---- */
     const camAlpha = camera.alpha;
 
-    // Correct forward so pressing W moves AWAY from camera
     const forward = new BABYLON.Vector3(
       Math.sin(camAlpha + Math.PI),
       0,
