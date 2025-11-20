@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>Babylon — 3rd Person Sphere (Multiplayer, Rings Centered, Day/Night)</title>
+  <title>Babylon — 3rd Person Sphere (Multiplayer, Rings Centered, Day/Night, Hills & Textured Cubes)</title>
   <link rel="icon" href="awodas.png" type="image/png">
   <style>
     html,body { width:100%; height:100%; margin:0; overflow:hidden; font-family: Inter, system-ui, sans-serif; }
@@ -10,7 +10,6 @@
     #ui { position: absolute; left: 12px; top: 12px; z-index: 50; color: white; text-shadow: 0 2px 6px rgba(0,0,0,0.7); user-select: none; pointer-events:none; }
     #coinCounter { background: rgba(0,0,0,0.45); padding: 10px 14px; border-radius: 8px; font-size: 18px; min-width: 120px; }
     #multiplier { margin-top: 8px; background: rgba(0,0,0,0.35); padding: 8px 12px; border-radius: 8px; font-size: 14px; }
-    /* small network status (hidden by default) */
     #netStatus { position: absolute; right: 12px; bottom: 12px; z-index:50; color: white; font-size: 12px; background: rgba(0,0,0,0.25); padding:6px 8px; border-radius:6px; display:none; }
   </style>
 
@@ -32,7 +31,7 @@
 
 <script>
 /* ============================================================
-   INIT + SETTINGS
+   SETTINGS
 ============================================================ */
 const canvas = document.getElementById("renderCanvas");
 const engine = new BABYLON.Engine(canvas, true);
@@ -41,7 +40,7 @@ const SETTINGS = {
   groundTopColor:  "#33FF4B",
   groundSideColor: "#8B5A2B",
   waterColor:      "#4DA6FF",
-  skyColor:        "#9DE9FF", // daytime color
+  skyColor:        "#9DE9FF",
 
   cubeCount: 30,
   hillCount: 10,
@@ -71,7 +70,11 @@ const SETTINGS = {
   // day/night
   dayColor: "#9DE9FF",
   nightColor: "#1B2432",
-  dayNightCycleMs: 5 * 60 * 1000 // 5 minutes total (2.5 -> night, 2.5 -> day)
+  dayNightCycleMs: 5 * 60 * 1000, // 5 minutes total (2.5 -> night, 2.5 -> day)
+
+  // texture (put your texture file here)
+  coatTexture: "box-texture.png", // optional - if present will be used on cubes/hills
+  coatSize: 2.04
 };
 
 // spawn zones
@@ -103,48 +106,48 @@ function lerpColor(hexA, hexB, t){
 }
 
 /* ============================================================
-   TRIANGULAR RAMP (keeps rampParams for trigger calc)
+   TRIANGULAR RAMP (right-triangle prism)
+   - Cross-section is a right triangle: (0,0) (10,0) (0,6)
+   - extrude along depth to create full prism
 ============================================================ */
-function makeTriRamp(scene) {
+function makeTriRamp(scene, nameSuffix="") {
+  // right triangle shape in XY plane
   const shape = [
     new BABYLON.Vector2(0,0),
     new BABYLON.Vector2(10,0),
-    new BABYLON.Vector2(10,6),
     new BABYLON.Vector2(0,6)
   ];
-  const depth = 4;
+  const depth = 6; // extrusion depth (thickness of ramp)
 
-  const ramp = BABYLON.MeshBuilder.ExtrudePolygon(
-    "triRamp",
-    { shape, depth, sideOrientation: BABYLON.Mesh.DOUBLESIDE },
-    scene
-  );
+  const ramp = BABYLON.MeshBuilder.ExtrudePolygon("triRamp"+nameSuffix, { shape, depth, sideOrientation: BABYLON.Mesh.DOUBLESIDE }, scene);
 
-  ramp.rotation.x = -Math.atan2(depth, 6);
+  // rotate so the extruded depth goes along local Z; tilt ramp so hypotenuse forms the ramp surface
+  // we rotate around X so slope faces up; angle computed from shape triangle (approx)
+  // shape height is 6, we place rotation to approximate slope angle:
+  ramp.rotation.x = -Math.atan2(depth, 6); // tuned so the extrusion and triangle slope make a usable ramp
 
-  const m = new BABYLON.StandardMaterial("rampMat", scene);
+  // material
+  const m = new BABYLON.StandardMaterial("rampMat"+nameSuffix, scene);
   m.diffuseColor = BABYLON.Color3.Random();
   ramp.material = m;
 
-  ramp.physicsImpostor = new BABYLON.PhysicsImpostor(
-    ramp, BABYLON.PhysicsImpostor.MeshImpostor,
-    { mass:0, friction:1, restitution:0 }, scene
-  );
+  ramp.physicsImpostor = new BABYLON.PhysicsImpostor(ramp, BABYLON.PhysicsImpostor.MeshImpostor, { mass:0, friction:1, restitution:0 }, scene);
 
-  ramp._rampParams = { depth, shapeWidth: 10, shapeHeight: 6 };
+  // store param for trigger calculations
+  ramp._rampParams = { depth, shapeWidth:10, shapeHeight:6 };
   return ramp;
 }
 
 /* ============================================================
-   MAIN SCENE
+   CREATE SCENE
 ============================================================ */
 function createScene(){
   const scene = new BABYLON.Scene(engine);
 
-  // initial sky color (day)
+  // start at day color
   scene.clearColor = color3FromHex(SETTINGS.dayColor);
 
-  // lights: hemispheric + directional (sun)
+  // lights
   const hemi = new BABYLON.HemisphericLight("hemi", new BABYLON.Vector3(0,1,0), scene);
   hemi.intensity = 0.9;
   const sun = new BABYLON.DirectionalLight("sun", new BABYLON.Vector3(-0.2, -1, 0.2), scene);
@@ -156,21 +159,17 @@ function createScene(){
   /* ---------------- GROUND (visual + physics separated) ---------------- */
   const groundSize = 300;
 
-  // visual ground (flat plane with green top)
   const groundVis = BABYLON.MeshBuilder.CreateGround("groundVis", { width: groundSize, height: groundSize, subdivisions: 4 }, scene);
   groundVis.position.y = 0;
   const groundVisMat = new BABYLON.StandardMaterial("groundVisMat", scene);
   groundVisMat.diffuseColor = BABYLON.Color3.FromHexString(SETTINGS.groundTopColor);
   groundVis.material = groundVisMat;
 
-  // physics ground (invisible box) sits slightly below plane to provide collisions
+  // collision ground block
   const groundPhys = BABYLON.MeshBuilder.CreateBox("groundPhys", { width: groundSize, height: 10, depth: groundSize }, scene);
-  groundPhys.position.y = -5; // so top of box is at y=0 (matching visual ground)
+  groundPhys.position.y = -5;
   groundPhys.isVisible = false;
-  groundPhys.physicsImpostor = new BABYLON.PhysicsImpostor(
-    groundPhys, BABYLON.PhysicsImpostor.BoxImpostor,
-    { mass:0, friction:2, restitution:0 }, scene
-  );
+  groundPhys.physicsImpostor = new BABYLON.PhysicsImpostor(groundPhys, BABYLON.PhysicsImpostor.BoxImpostor, { mass:0, friction:2, restitution:0 }, scene);
 
   /* ---------------- WATER ---------------- */
   const water = BABYLON.MeshBuilder.CreateGround("water", { width: 700, height: 700 }, scene);
@@ -191,47 +190,40 @@ function createScene(){
 
   /* ---------------- RAMPS + triggers ---------------- */
   const ramps = [];
-  const rampTriggers = []; // {ramp, worldTrigger, forward}
+  const rampTriggers = [];
   for(const r of RAMPS){
-    const ramp = makeTriRamp(scene);
+    const ramp = makeTriRamp(scene, "_" + r.x + "_" + r.z);
     ramp.position.set(r.x, 1.8, r.z);
     ramp.rotation.y = r.rotY;
     ramps.push(ramp);
 
-    // compute trigger near the ramp face center:
-    const depth = ramp._rampParams.depth || 4;
+    // compute trigger near ramp top center:
+    // use ramp.position + upward offset to approximate top center
     const forward = new BABYLON.Vector3(Math.sin(r.rotY), 0, Math.cos(r.rotY));
-    // worldTrigger placed near ramp center (we keep more centered to avoid offset)
-    const worldTrigger = ramp.position.add(new BABYLON.Vector3(0, 1.2, 0)); // center above ramp
+    const worldTrigger = ramp.position.add(new BABYLON.Vector3(0, 2.2, 0)); // a bit above ramp center
     rampTriggers.push({ ramp, worldTrigger, forward });
   }
 
   function onRampBoost(trigger){
+    // set velocity forward along ramp direction, plus vertical boost
     const impulse = trigger.forward.normalize().scale(8);
     sphere.physicsImpostor.setLinearVelocity(new BABYLON.Vector3(impulse.x, 12, impulse.z));
   }
 
-  /* ---------------- RINGS (centered on ramp center & rotated to ramp orientation) ---------------- */
+  /* ---------------- RINGS (centered & rotated to ramp orientation) ---------------- */
   const rings = [];
   for(let i=0;i<ramps.length;i++){
     const ramp = ramps[i];
-    // center at ramp.position (center of ramp) and raise by ringHeightOffset
     const center = ramp.position.clone();
     center.y += SETTINGS.ringHeightOffset;
-    const tor = BABYLON.MeshBuilder.CreateTorus("ring"+i, {
-      diameter: SETTINGS.ringRadius*2,
-      thickness: SETTINGS.ringThickness,
-      tessellation: 48
-    }, scene);
+    const tor = BABYLON.MeshBuilder.CreateTorus("ring"+i, { diameter: SETTINGS.ringRadius*2, thickness: SETTINGS.ringThickness, tessellation: 48 }, scene);
     tor.position.copyFrom(center);
-    // rotate so it's vertical and aligned to ramp's facing direction (rotate around y)
     tor.rotation.x = Math.PI/2;
     tor.rotation.y = ramp.rotation.y || 0;
     const rm = new BABYLON.StandardMaterial("ringMat"+i, scene);
     rm.emissiveColor = new BABYLON.Color3(0.9, 0.6, 0.1);
     rm.alpha = 0.95;
     tor.material = rm;
-    tor.scaling = new BABYLON.Vector3(1,1,1);
     rings.push({mesh: tor, center: center, usedBy: new Set(), rampIndex: i});
   }
 
@@ -262,11 +254,83 @@ function createScene(){
     trees.push({trunk, foliage});
   }
 
-  /* ----------------- random cubes, hills, arrows, coins... (kept mostly as before) ---------------- */
-  // (trimmed in this snippet for clarity; full behavior preserved below)
-  /* ... we'll create cubes, hills, arrows, coins, inputs, camera, multiplier, multiplayer etc. ... */
+  /* ----------------- Textured squares (random cubes) ----------------- */
+  const cubes = [];
+  // optional texture for cubes/hills
+  let coatTex = null;
+  if(SETTINGS.coatTexture){
+    coatTex = new BABYLON.Texture(SETTINGS.coatTexture, scene, true, false, BABYLON.Texture.TRILINEAR_SAMPLINGMODE);
+    coatTex.uScale = 1; coatTex.vScale = 1;
+  }
+  for (let i=0;i<SETTINGS.cubeCount;i++){
+    let x,z; let tries = 0;
+    do {
+      x = rndRange(-groundSize/2 + 8, groundSize/2 - 8);
+      z = rndRange(-groundSize/2 + 8, groundSize/2 - 8);
+      tries++;
+    } while((Math.hypot(x,z) < SETTINGS.safeRadius || SPAWN_ZONES.some(s => Math.hypot(x-s.x,z-s.z) < s.r)) && tries < 300);
 
-  /* ----------------- ARROWS (visual) ----------------- */
+    const b = BABYLON.MeshBuilder.CreateBox("cube"+i,{size:SETTINGS.cubeSize},scene);
+    b.position.set(x, SETTINGS.cubeSize/2 + 0.1, z);
+
+    const m = new BABYLON.StandardMaterial("cubeMat"+i, scene);
+    if(coatTex){
+      m.diffuseTexture = coatTex.clone(); // clone so scaling independent
+      m.diffuseTexture.uScale = SETTINGS.coatSize;
+      m.diffuseTexture.vScale = SETTINGS.coatSize;
+    } else {
+      m.diffuseColor = BABYLON.Color3.Random();
+    }
+    b.material = m;
+    b.physicsImpostor = new BABYLON.PhysicsImpostor(b, BABYLON.PhysicsImpostor.BoxImpostor, { mass:1, friction:1, restitution:0.05 }, scene);
+    cubes.push(b);
+  }
+
+  /* ----------------- HILLS (bigger boxes styled like ground) ----------------- */
+  const hills = [];
+  for(let i=0;i<SETTINGS.hillCount;i++){
+    let x,z,tries=0;
+    do {
+      x = rndRange(-groundSize/2 + 20, groundSize/2 - 20);
+      z = rndRange(-groundSize/2 + 20, groundSize/2 - 20);
+      tries++;
+    } while((Math.hypot(x,z) < SETTINGS.safeRadius || SPAWN_ZONES.some(s => Math.hypot(x-s.x,z-s.z) < s.r)) && tries < 500);
+
+    const size = rndRange(6, 16);
+    const hill = BABYLON.MeshBuilder.CreateBox("hill"+i, { width:size, height:size/2, depth:size }, scene);
+    hill.position.set(x, size/4 + 0.1, z);
+
+    // style like ground: MultiMaterial top and sides (or use texture)
+    const topMat = new BABYLON.StandardMaterial("hillTop"+i, scene);
+    topMat.diffuseColor = BABYLON.Color3.FromHexString(SETTINGS.groundTopColor);
+
+    const sideMat = new BABYLON.StandardMaterial("hillSide"+i, scene);
+    if(coatTex){
+      sideMat.diffuseTexture = coatTex.clone();
+      sideMat.diffuseTexture.uScale = size / 2;
+      sideMat.diffuseTexture.vScale = size / 2;
+    } else {
+      sideMat.diffuseColor = BABYLON.Color3.FromHexString(SETTINGS.groundSideColor);
+    }
+
+    const hm = new BABYLON.MultiMaterial("hillMulti"+i, scene);
+    hm.subMaterials = [sideMat, sideMat, sideMat, sideMat, topMat, sideMat];
+    hill.material = hm;
+
+    // assign submeshes for faces (six faces)
+    hill.subMeshes = [];
+    const vcount = hill.getTotalVertices();
+    let idxStart = 0;
+    for(let f=0; f<6; f++){
+      new BABYLON.SubMesh(f, 0, vcount, idxStart, 6, hill);
+      idxStart+=6;
+    }
+
+    hill.physicsImpostor = new BABYLON.PhysicsImpostor(hill, BABYLON.PhysicsImpostor.BoxImpostor, { mass:0, friction:1, restitution:0 }, scene);
+    hills.push(hill);
+  }
+
+  /* --------------- ARROWS --------------- */
   function makeArrow(name,color){
     const p = BABYLON.MeshBuilder.CreatePlane(name,{size:1},scene);
     const mm = new BABYLON.StandardMaterial(name+"Mat",scene);
@@ -281,6 +345,7 @@ function createScene(){
   const arrowB = (() => { const a=makeArrow("aB","#FF0000"); a.position.set(0,1.5,2); return a; })();
   const arrowL = (() => { const a=makeArrow("aL","#00A2FF"); a.position.set(-2,1.5,0); return a; })();
   const arrowR = (() => { const a=makeArrow("aR","#FFD800"); a.position.set(2,1.5,0); return a; })();
+
   function updateArrows(i){
     arrowF.material.emissiveColor = i.forward ? BABYLON.Color3.White() : BABYLON.Color3.Black();
     arrowB.material.emissiveColor = i.back ? BABYLON.Color3.White() : BABYLON.Color3.Black();
@@ -288,7 +353,7 @@ function createScene(){
     arrowR.material.emissiveColor = i.right ? BABYLON.Color3.White() : BABYLON.Color3.Black();
   }
 
-  /* ----------------- COINS (client-side fallback) ----------------- */
+  /* ----------------- COINS ----------------- */
   const coinMaterial = new BABYLON.StandardMaterial("coinMat", scene);
   coinMaterial.diffuseColor = new BABYLON.Color3(0.95,0.77,0.15);
   coinMaterial.emissiveColor = new BABYLON.Color3(0.7,0.5,0.05);
@@ -300,6 +365,7 @@ function createScene(){
     tor.position.y = 1.2;
     return tor;
   }
+  // spawn local coins (will be replaced if server provides authoritative list)
   const coinCap = SETTINGS.coinMax;
   function findSafeCoinPosition(){
     const margin = 8;
@@ -311,7 +377,7 @@ function createScene(){
       if(SPAWN_ZONES.some(s => Math.hypot(x-s.x,z-s.z) < s.r)) continue;
       let ok = true;
       for(const c of coins){
-        if(c && c.position && Math.hypot(c.position.x - x, c.position.z - z) < 3){ ok=false; break; }
+        if(c && c.mesh && Math.hypot(c.mesh.position.x - x, c.mesh.position.z - z) < 3){ ok=false; break; }
       }
       if(!ok) continue;
       return {x,z};
@@ -366,7 +432,7 @@ function createScene(){
   }
   setMultiplierActive(false);
 
-  // multiplayer: auto-connect to localhost server but don't show UI
+  // networking auto-connect (same server code as earlier)
   let socket = null;
   let playerId = Math.random().toString(36).slice(2,10);
   let room = "default";
@@ -387,13 +453,13 @@ function createScene(){
     socket.onopen = ()=> {
       netStatus.textContent = "Net: connected";
       socket.send(JSON.stringify({ type:"join", room, id: playerId }));
-      socket.send(JSON.stringify({ type: "requestInit", room, id: playerId }));
+      socket.send(JSON.stringify({ type: "requestInit", room, id:playerId }));
     };
     socket.onmessage = (ev)=>{
       try {
         const msg = JSON.parse(ev.data);
         if(msg.type === "init"){
-          // replace local coins with server authoritative list
+          // server coins override local coins
           for(const c of coins){ try { c.mesh.dispose(); } catch(e){} }
           coins.length = 0;
           if(Array.isArray(msg.coins)){
@@ -455,8 +521,6 @@ function createScene(){
     socket.onclose = ()=> { netStatus.textContent = "Net: disconnected"; setTimeout(()=> netStatus.style.display = "none", 2000); };
     socket.onerror = ()=> { netStatus.textContent = "Net: error"; setTimeout(()=> netStatus.style.display = "none", 2500); };
   }
-
-  // attempt to auto-connect but don't block gameplay
   try { connectAuto(); } catch(e) { console.warn("autoconnect fail", e); }
 
   function sendState(){
@@ -467,34 +531,27 @@ function createScene(){
   }
 
   /* ============================================================
-     DAY / NIGHT CYCLE
-     - cycleMs total: half to night, half to day (ping-pong)
+     DAY / NIGHT CYCLE (starts at day and ping-pongs to night)
   ============================================================ */
   const cycleMs = SETTINGS.dayNightCycleMs;
   const dayHex = SETTINGS.dayColor;
   const nightHex = SETTINGS.nightColor;
-
   function updateDayNight(){
     const now = Date.now();
     const phase = (now % cycleMs) / cycleMs; // 0..1
-    // ping-pong factor: 0..1..0 with mid at 0.5
+    // ping-pong 0->1->0 over full cycle, starting at 0 (day)
     let t;
-    if(phase < 0.5) t = phase * 2; else t = (1 - phase) * 2; // t goes 0->1->0 over cycle
-    // we want day->night when t goes 0->1, then back
+    if(phase < 0.5) t = phase * 2; else t = (1 - phase) * 2;
     const skyColor = lerpColor(dayHex, nightHex, t);
     scene.clearColor = skyColor;
-    // adjust hemisphere and sun intensity/color
-    const hemiIntensity = 0.6 + 0.4*(1 - t); // brighter during day (t=0 => max)
-    hemi.intensity = 0.5 + 0.7*(1 - t); // tunable
-    sun.intensity = 0.2 + 1.0*(1 - t); // dim at night
-    // tint sun color slightly toward warm at day and bluish at night
-    const sunColor = lerpColor("#FFF2C6", "#7A8BA8", t);
-    sun.diffuse = sunColor;
-    // optionally change fog/ambient, etc.
+    // adjust light intensities and tint
+    hemi.intensity = 0.5 + 0.7*(1 - t);
+    sun.intensity = 0.2 + 1.0*(1 - t);
+    sun.diffuse = lerpColor("#FFF2C6", "#7A8BA8", t);
   }
 
   /* ============================================================
-     MAIN GAME LOOP
+     MAIN LOOP
   ============================================================ */
   const worldForward = new BABYLON.Vector3(0,0,1);
   const worldRight   = new BABYLON.Vector3(1,0,0);
@@ -514,12 +571,10 @@ function createScene(){
   }
 
   scene.registerBeforeRender(()=>{
-    // day/night update
     updateDayNight();
-
     updateArrows(input);
 
-    // movement dir (world-space)
+    // movement
     let dir = BABYLON.Vector3.Zero();
     if(input.forward) dir.addInPlace(worldForward);
     if(input.back)    dir.subtractInPlace(worldForward);
@@ -531,9 +586,7 @@ function createScene(){
     const damped = new BABYLON.Vector3(v.x*SETTINGS.damp, v.y, v.z*SETTINGS.damp);
 
     if(dir.length()>0.001){
-      sphere.physicsImpostor.setLinearVelocity(
-        clampVel(damped.add(dir.scale(SETTINGS.moveForce * engine.getDeltaTime()*0.06)))
-      );
+      sphere.physicsImpostor.setLinearVelocity(clampVel(damped.add(dir.scale(SETTINGS.moveForce * engine.getDeltaTime()*0.06))));
     } else {
       sphere.physicsImpostor.setLinearVelocity(new BABYLON.Vector3(damped.x, v.y, damped.z));
     }
@@ -551,15 +604,17 @@ function createScene(){
       if(input.jump) sphere.physicsImpostor.setLinearVelocity(new BABYLON.Vector3(v.x, SETTINGS.swimUpSpeed, v.z));
     }
 
-    // ramp boosts (trigger uses rampTriggers worldTrigger center)
+    // ramp boosts: use rampTriggers (we used center-top trigger above)
     for(const trig of rampTriggers){
-      const d = BABYLON.Vector3.Distance(new BABYLON.Vector3(sphere.position.x,0,sphere.position.z), new BABYLON.Vector3(trig.worldTrigger.x,0,trig.worldTrigger.z));
+      const dx = sphere.position.x - trig.worldTrigger.x;
+      const dz = sphere.position.z - trig.worldTrigger.z;
+      const d = Math.hypot(dx, dz);
       if(d < 3.2 && Math.abs(sphere.position.y - trig.worldTrigger.y) < 3.0){
         onRampBoost(trig);
       }
     }
 
-    // ring detection (centered)
+    // rings
     for(const ring of rings){
       const dx = sphere.position.x - ring.center.x;
       const dz = sphere.position.z - ring.center.z;
@@ -569,17 +624,17 @@ function createScene(){
         if(!ring.usedBy.has(playerId)){
           grantMultiplier(SETTINGS.ringDurationSec);
           ring.usedBy.add(playerId);
-          // pulse once (YOYO) uniformly
           const s = ring.mesh;
           const stamp = Date.now();
-          BABYLON.Animation.CreateAndStartAnimation("p"+stamp, s, "scaling", 30, 12, s.scaling.clone(), s.scaling.scale(1.35), BABYLON.Animation.ANIMATIONLOOPMODE_YOYO);
+          // uniform scaling animation
+          BABYLON.Animation.CreateAndStartAnimation("pulse"+stamp, s, "scaling", 30, 12, s.scaling.clone(), s.scaling.scale(1.35), BABYLON.Animation.ANIMATIONLOOPMODE_YOYO);
         }
       } else {
         if(ring.usedBy.has(playerId)) ring.usedBy.delete(playerId);
       }
     }
 
-    // coin pickup detection
+    // coin pickup
     for(let i=0;i<coins.length;i++){
       const coin = coins[i];
       if(!coin || !coin.mesh || !coin.mesh.isVisible) continue;
@@ -618,7 +673,6 @@ function createScene(){
 
     camera.target = BABYLON.Vector3.Lerp(camera.target, sphere.position, 0.35);
 
-    // occasionally send state
     if(Math.random() < 0.06) sendState();
 
     // cleanup stale other players
@@ -635,7 +689,7 @@ function createScene(){
 }
 
 /* ============================================================
-   START ENGINE
+   START
 ============================================================ */
 const scene = createScene();
 engine.runRenderLoop(()=> scene.render());
