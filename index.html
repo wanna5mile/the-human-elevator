@@ -15,154 +15,137 @@
 <canvas id="renderCanvas"></canvas>
 
 <script>
-const canvas = document.getElementById("renderCanvas");
-const engine = new BABYLON.Engine(canvas, true);
+    const canvas = document.getElementById("renderCanvas");
+    const engine = new BABYLON.Engine(canvas, true);
 
-const createScene = () => {
-    const scene = new BABYLON.Scene(engine);
+    const createScene = function () {
+        const scene = new BABYLON.Scene(engine);
+        scene.clearColor = new BABYLON.Color3(0.62, 0.91, 1); // 9DE9FF sky
 
-    // SKY
-    scene.clearColor = BABYLON.Color3.FromHexString("#9DE9FF");
+        // Enable physics
+        const gravityVector = new BABYLON.Vector3(0, -9.81, 0);
+        const physicsPlugin = new BABYLON.CannonJSPlugin();
+        scene.enablePhysics(gravityVector, physicsPlugin);
 
-    // ----- PHYSICS -----
-    const gravityVector = new BABYLON.Vector3(0, -9.81, 0);
-    const physicsPlugin = new BABYLON.CannonJSPlugin();
-    scene.enablePhysics(gravityVector, physicsPlugin);
-
-    // ----- FOLLOW CAMERA -----
-    const camera = new BABYLON.FollowCamera("followCam",
-        new BABYLON.Vector3(0, 5, -15),
-        scene
-    );
-    camera.radius = 18;        
-    camera.heightOffset = 7;   
-    camera.rotationOffset = 0; 
-    camera.cameraAcceleration = 0.05;
-    camera.maxCameraSpeed = 10;
-    camera.attachControl(canvas, true);
-
-    // ----- LIGHT -----
-    new BABYLON.HemisphericLight("light", new BABYLON.Vector3(1, 1, 0), scene);
-
-    // ----- GROUND -----
-    const ground = BABYLON.MeshBuilder.CreateGround("ground", { width: 200, height: 200 }, scene);
-    const gmat = new BABYLON.StandardMaterial("gmat", scene);
-    gmat.diffuseColor = BABYLON.Color3.FromHexString("#33FF4B");
-    ground.material = gmat;
-
-    ground.physicsImpostor = new BABYLON.PhysicsImpostor(
-        ground,
-        BABYLON.PhysicsImpostor.BoxImpostor,
-        { mass: 0, friction: 1, restitution: 0 }
-    );
-
-    // ----- PLAYER SPHERE -----
-    const sphere = BABYLON.MeshBuilder.CreateSphere("player", { diameter: 2 }, scene);
-    sphere.position.y = 5;
-
-    const randomColor = () => new BABYLON.Color3(Math.random(), Math.random(), Math.random());
-    const sphereMat = new BABYLON.StandardMaterial("sphereMat", scene);
-    sphereMat.diffuseColor = randomColor();
-    sphere.material = sphereMat;
-
-    sphere.physicsImpostor = new BABYLON.PhysicsImpostor(
-        sphere,
-        BABYLON.PhysicsImpostor.SphereImpostor,
-        { mass: 1, friction: 0.5, restitution: 0.2 }
-    );
-
-    camera.lockedTarget = sphere; // camera now follows the sphere
-
-    // ----- PLAYER MOVEMENT -----
-    const input = { w: false, a: false, s: false, d: false };
-    const speed = 0.25;
-    let canJump = false;  // will activate only when sphere touches ground
-
-    window.addEventListener("keydown", (e) => {
-        if (e.key.toLowerCase() in input) input[e.key.toLowerCase()] = true;
-
-        if (e.key === " " && canJump) {
-            sphere.physicsImpostor.applyImpulse(
-                new BABYLON.Vector3(0, 8, 0),
-                sphere.getAbsolutePosition()
-            );
-            canJump = false;
-        }
-    });
-
-    window.addEventListener("keyup", (e) => {
-        if (e.key.toLowerCase() in input) input[e.key.toLowerCase()] = false;
-    });
-
-    // Movement each frame
-    scene.onBeforeRenderObservable.add(() => {
-        const vel = sphere.physicsImpostor.getLinearVelocity();
-        let mx = 0, mz = 0;
-
-        if (input.w) mz += speed;
-        if (input.s) mz -= speed;
-        if (input.a) mx -= speed;
-        if (input.d) mx += speed;
-
-        sphere.physicsImpostor.setLinearVelocity(
-            new BABYLON.Vector3(vel.x + mx, vel.y, vel.z + mz)
-        );
-
-        // Respawn sphere if it falls
-        if (sphere.position.y < -30) {
-            sphere.position.set(0, 5, 0);
-            sphere.physicsImpostor.setLinearVelocity(new BABYLON.Vector3(0, 0, 0));
-        }
-    });
-
-    // When sphere touches the ground → allow jumping again
-    sphere.physicsImpostor.registerOnPhysicsCollide(ground.physicsImpostor, () => {
-        canJump = true;
-    });
-
-    // ----- RANDOM CUBES -----
-    function spawnCube() {
-        const safeRadius = 6;
-        let x, z;
-        do {
-            x = (Math.random() - 0.5) * 150;
-            z = (Math.random() - 0.5) * 150;
-        } while (Math.sqrt(x * x + z * z) < safeRadius);
-
-        const cube = BABYLON.MeshBuilder.CreateBox("cube", { size: 2 }, scene);
-        cube.position = new BABYLON.Vector3(x, 10, z);
-
-        const mat = new BABYLON.StandardMaterial("cubeMat", scene);
-        mat.diffuseColor = randomColor();
-        cube.material = mat;
-
-        cube.physicsImpostor = new BABYLON.PhysicsImpostor(
-            cube,
+        // Ground
+        const ground = BABYLON.MeshBuilder.CreateGround("ground", {
+            width: 200,
+            height: 200
+        }, scene);
+        ground.position.y = 0;
+        ground.material = new BABYLON.StandardMaterial("gmat", scene);
+        ground.material.diffuseColor = BABYLON.Color3.FromHexString("#33F4B");
+        ground.physicsImpostor = new BABYLON.PhysicsImpostor(
+            ground,
             BABYLON.PhysicsImpostor.BoxImpostor,
-            { mass: 1, friction: 1, restitution: 0.1 }
+            { mass: 0, friction: 1, restitution: 0 },
+            scene
         );
 
-        // Cube falls → respawn
-        scene.onBeforeRenderObservable.add(() => {
-            if (cube.position.y < -30) {
-                cube.position = new BABYLON.Vector3(
-                    (Math.random() - 0.5) * 150, 15, (Math.random() - 0.5) * 150
-                );
-                cube.physicsImpostor.setLinearVelocity(new BABYLON.Vector3(0, 0, 0));
+        // Player sphere
+        const sphere = BABYLON.MeshBuilder.CreateSphere("player", { diameter: 2 }, scene);
+        sphere.position = new BABYLON.Vector3(0, 3, 0);
+        sphere.material = new BABYLON.StandardMaterial("smat", scene);
+        sphere.material.diffuseColor = BABYLON.Color3.Random();
+
+        sphere.physicsImpostor = new BABYLON.PhysicsImpostor(
+            sphere,
+            BABYLON.PhysicsImpostor.SphereImpostor,
+            { mass: 1, friction: 0.5, restitution: 0.0 },
+            scene
+        );
+
+        // Follow Camera (does NOT rotate with sphere rolling)
+        const camera = new BABYLON.FollowCamera("FollowCam", sphere.position, scene);
+        camera.radius = 15;      // distance behind player
+        camera.heightOffset = 6; // height above player
+        camera.rotationOffset = 0;
+        camera.cameraAcceleration = 0.1;
+        camera.maxCameraSpeed = 5;
+        camera.lockedTarget = sphere;
+
+        // Movement input tracking
+        const input = { w: false, a: false, s: false, d: false, space: false };
+        window.addEventListener("keydown", (e) => input[e.key.toLowerCase()] = true);
+        window.addEventListener("keyup",   (e) => input[e.key.toLowerCase()] = false);
+
+        let canJump = false;
+        const MOVE_SPEED = 1.2;
+        const DAMPING = 0.92; // smooth slowdown
+
+        scene.registerBeforeRender(() => {
+
+            const vel = sphere.physicsImpostor.getLinearVelocity();
+
+            // Slowdown when no key pressed
+            vel.x *= DAMPING;
+            vel.z *= DAMPING;
+
+            // Movement (WASD)
+            if (input.w) vel.z -= MOVE_SPEED;
+            if (input.s) vel.z += MOVE_SPEED;
+            if (input.a) vel.x -= MOVE_SPEED;
+            if (input.d) vel.x += MOVE_SPEED;
+
+            // Jump only if grounded
+            if (input.space && canJump) {
+                vel.y = 8;
+                canJump = false;
+            }
+
+            sphere.physicsImpostor.setLinearVelocity(vel);
+
+            // Detect if sphere is touching the ground
+            if (Math.abs(sphere.position.y - 1) < 0.3) {
+                canJump = true;
+            }
+
+            // Respawn if falls
+            if (sphere.position.y < -20) {
+                sphere.physicsImpostor.setLinearVelocity(BABYLON.Vector3.Zero());
+                sphere.position = new BABYLON.Vector3(0, 5, 0);
             }
         });
 
-        return cube;
-    }
+        // Spawn cubes that respawn when falling
+        function spawnCube() {
+            const cube = BABYLON.MeshBuilder.CreateBox("cube", { size: 2 }, scene);
+            cube.material = new BABYLON.StandardMaterial("cmat", scene);
+            cube.material.diffuseColor = BABYLON.Color3.Random();
 
-    for (let i = 0; i < 25; i++) spawnCube();
+            // Keep spawn away from the sphere
+            const DIST = 15;
+            let x, z;
+            do {
+                x = (Math.random() - 0.5) * 180;
+                z = (Math.random() - 0.5) * 180;
+            } while (Math.abs(x - sphere.position.x) < DIST && Math.abs(z - sphere.position.z) < DIST);
 
-    return scene;
-};
+            cube.position = new BABYLON.Vector3(x, 5, z);
 
-const scene = createScene();
-engine.runRenderLoop(() => scene.render());
-window.addEventListener("resize", () => engine.resize());
+            cube.physicsImpostor = new BABYLON.PhysicsImpostor(
+                cube,
+                BABYLON.PhysicsImpostor.BoxImpostor,
+                { mass: 1, friction: 0.8, restitution: 0.2 },
+                scene
+            );
+
+            // Respawn if falls
+            scene.registerBeforeRender(() => {
+                if (cube.position.y < -20) {
+                    cube.position = new BABYLON.Vector3(x, 10, z);
+                    cube.physicsImpostor.setLinearVelocity(BABYLON.Vector3.Zero());
+                }
+            });
+        }
+
+        for (let i = 0; i < 30; i++) spawnCube();
+
+        return scene;
+    };
+
+    const scene = createScene();
+    engine.runRenderLoop(() => scene.render());
 </script>
 
 </body>
