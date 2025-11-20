@@ -75,41 +75,61 @@ const SETTINGS = {
   dayNightCycleMs: 5 * 60 * 1000,
 
   coatTexture: "box-texture.png",
-  coatSize: 1.0   // <- changed to 1x1 per request
+  coatSize: 1.0   // 1x1, no repeat
 };
 
 function rndRange(min,max){ return Math.random()*(max-min)+min; }
 function color3(hex){ return BABYLON.Color3.FromHexString(hex); }
 
 /* ============================================================
-   TRIANGULAR RAMP
-   (kept using fixed positions instead of random)
+   HELPER: distance 2d
 ============================================================ */
-function makeTriRamp(scene, nameSuffix="") {
+function dist2(a,b){
+  return Math.hypot(a.x-b.x, a.z-b.z);
+}
+
+/* ============================================================
+   TRIANGULAR RAMP (right triangle wedge, extruded)
+   - width: X axis
+   - height: Y axis (rise)
+   - depth: Z extrusion
+   - pivot positioned so bottom rests on ground
+============================================================ */
+function makeTriRamp(scene, name="ramp", width=10, height=6, depth=8) {
   const shape = [
-    new BABYLON.Vector2(0,0),
-    new BABYLON.Vector2(10,0),
-    new BABYLON.Vector2(0,6)
+    new BABYLON.Vector2(0,0),       // bottom-left
+    new BABYLON.Vector2(width,0),   // bottom-right
+    new BABYLON.Vector2(0,height)   // top-left (right angle at origin)
   ];
-  const depth = 6;
 
   const ramp = BABYLON.MeshBuilder.ExtrudePolygon(
-    "triRamp"+nameSuffix,
+    name,
     { shape, depth, sideOrientation: BABYLON.Mesh.DOUBLESIDE },
     scene
   );
 
-  ramp.rotation.x = -Math.atan2(depth, 6);
-  const m = new BABYLON.StandardMaterial("rampMat"+nameSuffix, scene);
-  m.diffuseColor = new BABYLON.Color3(0.6,0.6,0.6);
+  // By default the extrude places mesh so base sits at y=0; but the extruded geometry's center
+  // can be at height/2, so positioning at height/2 puts it sat on the ground.
+  ramp.position.y = height / 2;
+
+  // Set a stable pivot at the center (no offset necessary after position.y)
+  // Optionally rotate later when placing.
+
+  // material
+  const m = new BABYLON.StandardMaterial(name+"Mat", scene);
+  m.diffuseColor = new BABYLON.Color3(0.65,0.65,0.65);
   ramp.material = m;
 
+  // physics - mesh impostor for precise collisions, anchored (mass 0)
   ramp.physicsImpostor = new BABYLON.PhysicsImpostor(
     ramp,
     BABYLON.PhysicsImpostor.MeshImpostor,
-    { mass:0, friction:1, restitution:0 },
+    { mass:0, friction: 1.0, restitution: 0 },
     scene
   );
+
+  // make sure it receives shadows / collisions correctly
+  ramp.isPickable = false;
 
   return ramp;
 }
@@ -138,7 +158,6 @@ function createScene(){
     { width: groundSize, height: groundSize, subdivisions: 4 },
     scene
   );
-  // ground top color
   groundVis.material = new BABYLON.StandardMaterial("gMat", scene);
   groundVis.material.diffuseColor = color3(SETTINGS.groundTopColor);
 
@@ -166,25 +185,29 @@ function createScene(){
   waterMat.addToRenderList(groundVis);
 
   /* ---------------- RAMPS ---------------- */
-  // keep ramps at fixed, deterministic positions
+  // fixed ramp definitions: position is centered on ramp's origin (we set ramp.position.y already inside create)
   const RAMPS = [
-    { x: 20,  z: 20,  rotY: 0 },
-    { x: -30, z: -10, rotY: Math.PI/2 },
-    { x: 40,  z: -40, rotY: Math.PI/3 }
+    { x: 20,  z: 20,  rotY: 0,      width: 12, height: 6, depth: 8 },
+    { x: -30, z: -10, rotY: Math.PI/2, width: 10, height: 8, depth: 8 },
+    { x: 40,  z: -40, rotY: Math.PI/3, width: 14, height: 7, depth: 10 }
   ];
 
   const ramps = [];
   for(const r of RAMPS){
-    const ramp = makeTriRamp(scene, "_" + r.x + "_" + r.z);
-    ramp.position.set(r.x, 1.8, r.z);
+    const ramp = makeTriRamp(scene, "ramp_"+r.x+"_"+r.z, r.width, r.height, r.depth);
+    // Set X/Z coordinates; ramp.position.y already set to (height/2)
+    ramp.position.x = r.x;
+    ramp.position.z = r.z;
     ramp.rotation.y = r.rotY;
-    ramps.push(ramp);
+    // Anchor it: mass 0 already set, but freeze transforms if needed
+    ramp.doNotSyncBoundingInfo = false;
+    ramps.push({ mesh: ramp, def: r });
   }
 
   /* ---------------- RINGS ---------------- */
   const rings = [];
   for(let i=0;i<ramps.length;i++){
-    const ramp = ramps[i];
+    const ramp = ramps[i].mesh;
     const pos = ramp.position.clone();
     pos.y += SETTINGS.ringHeightOffset;
 
@@ -206,42 +229,68 @@ function createScene(){
   }
 
   /* ---------------- TREES ---------------- */
-  // deterministic grid placement for trees (fixed)
+  // Natural-ish placement with variation & ramp avoidance
   const trees = [];
-  (function placeTrees(){
+  (function placeTrees() {
     const count = SETTINGS.treeCount;
-    const cols = Math.ceil(Math.sqrt(count));
-    const spacing = 12;
-    let ix = 0;
-    for(let r=0;r<cols && ix<count;r++){
-      for(let c=0;c<cols && ix<count;c++){
-        const x = -cols/2*spacing + c*spacing + 6; // offset a bit
-        const z = -cols/2*spacing + r*spacing + 6;
-        const trunk = BABYLON.MeshBuilder.CreateCylinder("trunk"+ix, {
-          height:3, diameterTop:0.6, diameterBottom:0.8
-        }, scene);
-        trunk.position.set(x,1.5,z);
-        trunk.material = new BABYLON.StandardMaterial("tm"+ix, scene);
-        trunk.material.diffuseColor = new BABYLON.Color3(0.35,0.25,0.12);
+    let attempts = 0;
+    let placed = 0;
+    while (placed < count && attempts < count * 20) {
+      attempts++;
+      const x = rndRange(-groundSize/2 + 10, groundSize/2 - 10);
+      const z = rndRange(-groundSize/2 + 10, groundSize/2 - 10);
 
-        const leaf = BABYLON.MeshBuilder.CreateCylinder("leaf"+ix, {
-          height:4, diameterBottom:3, diameterTop:0
-        }, scene);
-        leaf.position.set(x,4,z);
-        leaf.material = new BABYLON.StandardMaterial("lm"+ix, scene);
-        leaf.material.diffuseColor = color3(SETTINGS.groundTopColor);
-
-        trees.push({trunk,leaf});
-        ix++;
+      // avoid ramps + ground center safe radius
+      let ok = true;
+      for (const r of RAMPS) {
+        const dd = Math.hypot(x - r.x, z - r.z);
+        if (dd < Math.max(r.width || 10, 10) + 6) { ok = false; break; }
       }
+      if (!ok) continue;
+
+      // avoid clustering too tightly
+      let tooClose = false;
+      for (const t of trees) {
+        if (Math.hypot(x - t.x, z - t.z) < 3.5) { tooClose = true; break; }
+      }
+      if (tooClose) continue;
+
+      const trunkH = rndRange(2.2, 3.6);
+      const leafH  = rndRange(3.0, 5.0);
+      const leafSize = rndRange(2.0, 4.0);
+      const tiltX = rndRange(-0.12, 0.12);
+      const tiltZ = rndRange(-0.12, 0.12);
+
+      const trunk = BABYLON.MeshBuilder.CreateCylinder("trunk"+placed, {
+        height: trunkH, diameterTop: 0.5, diameterBottom: 0.8
+      }, scene);
+      trunk.position.set(x, trunkH/2, z);
+      trunk.rotation.z = tiltZ * 0.3;
+
+      trunk.material = new BABYLON.StandardMaterial("tm"+placed, scene);
+      trunk.material.diffuseColor = new BABYLON.Color3(0.35,0.25,0.12);
+
+      const leaf = BABYLON.MeshBuilder.CreateCylinder("leaf"+placed, {
+        height: leafH, diameterBottom: leafSize, diameterTop: 0
+      }, scene);
+      leaf.position.set(x, trunkH + leafH/2 - 0.3, z);
+      leaf.rotation.x = tiltX;
+      leaf.rotation.z = tiltZ;
+      leaf.scaling.x = rndRange(0.9, 1.2);
+      leaf.scaling.z = rndRange(0.9, 1.2);
+
+      leaf.material = new BABYLON.StandardMaterial("lm"+placed, scene);
+      leaf.material.diffuseColor = color3(SETTINGS.groundTopColor);
+
+      trees.push({ trunk, leaf, x, z });
+      placed++;
     }
   })();
 
   /* ---------------- COAT TEXTURE (for small cubes only) ---------------- */
   let coatTex = null;
-  if(SETTINGS.coatTexture){
+  if (SETTINGS.coatTexture) {
     coatTex = new BABYLON.Texture(SETTINGS.coatTexture, scene);
-    // ensure 1x1 and no repeating (clamp)
     coatTex.uScale = SETTINGS.coatSize;
     coatTex.vScale = SETTINGS.coatSize;
     coatTex.wrapU = BABYLON.Texture.CLAMP_ADDRESSMODE;
@@ -249,31 +298,26 @@ function createScene(){
   }
 
   /* ---------------- CUBES (SMALL) ---------------- */
-  // deterministic grid placement for cubes (fixed locations)
   const cubes = [];
   (function placeCubes(){
     const count = SETTINGS.cubeCount;
     const cols = Math.ceil(Math.sqrt(count));
-    const spacing = 6 + SETTINGS.cubeSize; // spacing between cubes
+    const spacing = 6 + SETTINGS.cubeSize;
     let ix = 0;
-    for(let r=0;r<cols && ix<count;r++){
-      for(let c=0;c<cols && ix<count;c++){
-        const x = -cols/2*spacing + c*spacing + 10; // offset from center
-        const z = -cols/2*spacing + r*spacing + 10;
+    for (let r = 0; r < cols && ix < count; r++) {
+      for (let c = 0; c < cols && ix < count; c++) {
+        const x = -cols/2 * spacing + c*spacing + 10;
+        const z = -cols/2 * spacing + r*spacing + 10;
         const cmesh = BABYLON.MeshBuilder.CreateBox("cube"+ix, {size:SETTINGS.cubeSize}, scene);
         cmesh.position.set(x, SETTINGS.cubeSize/2 + 0.1, z);
 
         const m = new BABYLON.StandardMaterial("cm"+ix, scene);
-        if(coatTex){
-          // use a clone of the texture for per-material scaling if needed
+        if (coatTex) {
           m.diffuseTexture = coatTex.clone();
-          // set 1x1 mapping (u/v scale).
           m.diffuseTexture.uScale = SETTINGS.coatSize;
           m.diffuseTexture.vScale = SETTINGS.coatSize;
-          // clamp to avoid repeating
           m.diffuseTexture.wrapU = BABYLON.Texture.CLAMP_ADDRESSMODE;
           m.diffuseTexture.wrapV = BABYLON.Texture.CLAMP_ADDRESSMODE;
-          // Ensure the texture fills each face (default box UVs are OK for this)
         } else {
           m.diffuseColor = BABYLON.Color3.Random();
         }
@@ -293,35 +337,34 @@ function createScene(){
   })();
 
   /* ---------------- HILLS (BIG BOXES) ---------------- */
-  // deterministic grid placement for hills (fixed)
+  // Use MultiMaterial approach: top green, sides brown
   const hills = [];
   (function placeHills(){
     const count = SETTINGS.hillCount;
     const cols = Math.ceil(Math.sqrt(count));
     const spacing = 24;
     let ix = 0;
-    for(let r=0;r<cols && ix<count;r++){
-      for(let c=0;c<cols && ix<count;c++){
-        const size = 6 + ix * 0.5; // slight size variance but deterministic
-        const x = -cols/2*spacing + c*spacing - 40; // shift them elsewhere
+    for (let r = 0; r < cols && ix < count; r++) {
+      for (let c = 0; c < cols && ix < count; c++) {
+        const size = 6 + ix * 0.5;
+        const x = -cols/2*spacing + c*spacing - 40;
         const z = -cols/2*spacing + r*spacing - 40;
+
         const h = BABYLON.MeshBuilder.CreateBox("hill"+ix, {width:size, height:size/2, depth:size}, scene);
         h.position.set(x, size/4 + 0.1, z);
 
-        // top material (green, matches ground top)
         const top = new BABYLON.StandardMaterial("hTop"+ix, scene);
         top.diffuseColor = color3(SETTINGS.groundTopColor);
 
-        // sides material (brown)
         const sides = new BABYLON.StandardMaterial("hSide"+ix, scene);
         sides.diffuseColor = color3(SETTINGS.groundSideColor);
 
-        // MultiMaterial: [front, back, right, left, top, bottom] - assign top green, rest brown
+        // MultiMaterial - assign top green and rest brown
         const mm = new BABYLON.MultiMaterial("hillM"+ix, scene);
-        mm.subMaterials = [sides,sides,sides,sides,top,sides];
+        mm.subMaterials = [sides, sides, sides, sides, top, sides];
         h.material = mm;
 
-        // physics for hills
+        // physics
         h.physicsImpostor = new BABYLON.PhysicsImpostor(
           h,
           BABYLON.PhysicsImpostor.BoxImpostor,
@@ -354,6 +397,7 @@ function createScene(){
       1.2,
       rndRange(-groundSize/2+12, groundSize/2-12)
     );
+    // coins are kinematic-ish (no physics) by default; add impostor if you want pickup collision by physics
     return c;
   }
 
