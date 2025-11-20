@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>BabylonJS Starter</title>
+    <title>Babylon Player Test</title>
     <style>
         html, body {
             width: 100%;
@@ -22,56 +22,121 @@
 
 <canvas id="renderCanvas"></canvas>
 
-<!-- Babylon.js from CDN (this loads the engine automatically) -->
 <script src="https://cdn.babylonjs.com/babylon.js"></script>
 
 <script>
-    // Get the canvas & create engine
     const canvas = document.getElementById("renderCanvas");
     const engine = new BABYLON.Engine(canvas, true);
 
     const createScene = function () {
         const scene = new BABYLON.Scene(engine);
 
-        // Camera
-        const camera = new BABYLON.ArcRotateCamera(
-            "camera",
-            Math.PI / 2,
-            Math.PI / 3,
-            10,
-            BABYLON.Vector3.Zero(),
+        // Enable physics
+        scene.enablePhysics(new BABYLON.Vector3(0, -9.81, 0));
+
+        // Camera follows player
+        const camera = new BABYLON.FollowCamera(
+            "followCam",
+            new BABYLON.Vector3(0, 5, -15),
             scene
         );
-        camera.attachControl(canvas, true);
+        camera.radius = 12;
+        camera.heightOffset = 5;
+        camera.rotationOffset = 0;
+        camera.cameraAcceleration = 0.05;
+        camera.maxCameraSpeed = 10;
 
         // Light
-        const light = new BABYLON.HemisphericLight(
-            "light",
-            new BABYLON.Vector3(0, 1, 0),
+        new BABYLON.HemisphericLight("light", new BABYLON.Vector3(0, 1, 0), scene);
+
+        // Player (sphere)
+        const player = BABYLON.MeshBuilder.CreateSphere("player", { diameter: 2 }, scene);
+        player.position.y = 2;
+
+        // Player physics
+        player.physicsImpostor = new BABYLON.PhysicsImpostor(
+            player,
+            BABYLON.PhysicsImpostor.SphereImpostor,
+            { mass: 1, friction: 0.5, restitution: 0.1 },
             scene
         );
 
-        // Sphere
-        const sphere = BABYLON.MeshBuilder.CreateSphere("sphere", { diameter: 2 }, scene);
-        sphere.position.y = 1;
+        camera.lockedTarget = player; // camera follows player
 
-        // Ground
-        const ground = BABYLON.MeshBuilder.CreateGround("ground", { width: 6, height: 6 }, scene);
+        // Ground (bigger)
+        const ground = BABYLON.MeshBuilder.CreateGround("ground", { width: 50, height: 50 }, scene);
+        ground.position.y = 0;
+        ground.physicsImpostor = new BABYLON.PhysicsImpostor(
+            ground,
+            BABYLON.PhysicsImpostor.BoxImpostor,
+            { mass: 0, friction: 1, restitution: 0 },
+            scene
+        );
+
+        // Add some random blocks
+        for (let i = 0; i < 10; i++) {
+            const box = BABYLON.MeshBuilder.CreateBox("box" + i, { size: 2 }, scene);
+            box.position.x = Math.random() * 40 - 20;
+            box.position.z = Math.random() * 40 - 20;
+            box.position.y = 1;
+
+            box.physicsImpostor = new BABYLON.PhysicsImpostor(
+                box,
+                BABYLON.PhysicsImpostor.BoxImpostor,
+                { mass: 0, friction: 1 }
+            );
+        }
+
+        // -------- PLAYER MOVEMENT -------- //
+        const input = {
+            forward: false,
+            backward: false,
+            left: false,
+            right: false,
+            jump: false
+        };
+
+        window.addEventListener("keydown", (e) => {
+            if (e.key === "w" || e.key === "ArrowUp") input.forward = true;
+            if (e.key === "s" || e.key === "ArrowDown") input.backward = true;
+            if (e.key === "a" || e.key === "ArrowLeft") input.left = true;
+            if (e.key === "d" || e.key === "ArrowRight") input.right = true;
+            if (e.key === " ") input.jump = true;
+        });
+
+        window.addEventListener("keyup", (e) => {
+            if (e.key === "w" || e.key === "ArrowUp") input.forward = false;
+            if (e.key === "s" || e.key === "ArrowDown") input.backward = false;
+            if (e.key === "a" || e.key === "ArrowLeft") input.left = false;
+            if (e.key === "d" || e.key === "ArrowRight") input.right = false;
+            if (e.key === " ") input.jump = false;
+        });
+
+        // Movement every frame
+        scene.onBeforeRenderObservable.add(() => {
+            const force = 0.5;    // movement speed
+            const jumpForce = 8;  // jump height
+
+            let velocity = player.physicsImpostor.getLinearVelocity();
+
+            if (input.forward)  player.physicsImpostor.applyImpulse(new BABYLON.Vector3(0, 0,  force * -1), player.getAbsolutePosition());
+            if (input.backward) player.physicsImpostor.applyImpulse(new BABYLON.Vector3(0, 0,  force), player.getAbsolutePosition());
+            if (input.left)     player.physicsImpostor.applyImpulse(new BABYLON.Vector3(force * -1, 0, 0), player.getAbsolutePosition());
+            if (input.right)    player.physicsImpostor.applyImpulse(new BABYLON.Vector3(force, 0, 0), player.getAbsolutePosition());
+
+            // Jump only if player is near the ground
+            if (input.jump && Math.abs(player.position.y - 1) < 1.2) {
+                player.physicsImpostor.applyImpulse(new BABYLON.Vector3(0, jumpForce, 0), player.getAbsolutePosition());
+            }
+        });
 
         return scene;
     };
 
     const scene = createScene();
 
-    // Render loop
-    engine.runRenderLoop(function () {
-        scene.render();
-    });
-
-    // Resize the engine if the window is resized
-    window.addEventListener("resize", function () {
-        engine.resize();
-    });
+    engine.runRenderLoop(() => scene.render());
+    window.addEventListener("resize", () => engine.resize());
 </script>
 
 </body>
