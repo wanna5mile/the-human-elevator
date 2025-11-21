@@ -228,31 +228,57 @@ function makeTriWedge(scene, name, width = 10, height = 6, depth = 8) {
       scene
     );
 
-    /* ---------------- WATER ---------------- */
-    const waterMesh = BABYLON.MeshBuilder.CreateGround("waterSurface", { width: 700, height: 700, subdivisions: 32 }, scene);
-    waterMesh.position.y = WATER_SURFACE_Y;
-    const waterMat = new BABYLON.WaterMaterial("waterMat", scene);
-    waterMat.bumpTexture = new BABYLON.Texture("https://cdn.babylonjs.com/textures/waterbump.png", scene);
-    waterMat.windForce = -2;
-    waterMat.waveHeight = 0.25;
-    waterMat.waveLength = 0.12;
-    waterMat.waterColor = color3(SETTINGS.waterColor);
-    waterMat.colorBlendFactor = 0.3;
-    waterMesh.material = waterMat;
-    waterMesh.receiveShadows = true;
+/* ---------------- WATER (FIXED - no checker texture) ---------------- */
+const waterMesh = BABYLON.MeshBuilder.CreateGround("waterSurface", {
+  width: 700,
+  height: 700,
+  subdivisions: 64
+}, scene);
 
-    const waterVol = BABYLON.MeshBuilder.CreateBox("waterVolume", {
-      width: 700,
-      height: WATER_DEPTH,
-      depth: 700
-    }, scene);
-    waterVol.position.y = WATER_SURFACE_Y - WATER_DEPTH/2;
-    const waterVolMat = new BABYLON.StandardMaterial("waterVolMat", scene);
-    waterVolMat.diffuseColor = color3(SETTINGS.waterColor);
-    waterVolMat.alpha = 0.35;
-    waterVolMat.backFaceCulling = false;
-    waterVol.material = waterVolMat;
-    waterVol.isPickable = false;
+waterMesh.position.y = WATER_SURFACE_Y;
+
+const waterMat = new BABYLON.WaterMaterial("waterMat", scene);
+
+// ✅ guaranteed valid bump texture
+waterMat.bumpTexture = new BABYLON.Texture(
+  "https://cdn.babylonjs.com/textures/waterbump.png",
+  scene
+);
+
+// ✅ explicit render target size prevents fallback checker pattern
+waterMat.renderTargetSize = new BABYLON.Vector2(512, 512);
+
+// ✅ stable water settings
+waterMat.windForce = -4;
+waterMat.waveHeight = 0.35;
+waterMat.waveLength = 0.15;
+waterMat.waveSpeed = 0.8;
+waterMat.bumpHeight = 0.2;
+
+waterMat.waterColor = color3(SETTINGS.waterColor);
+waterMat.waterColorLevel = 0.8;
+waterMat.fresnelLevel = 1.0;
+waterMat.colorBlendFactor = 0.25;
+
+waterMesh.material = waterMat;
+waterMesh.receiveShadows = true;
+
+/* ---- WATER BODY (under surface volume) ---- */
+const waterVol = BABYLON.MeshBuilder.CreateBox("waterVolume", {
+  width: 700,
+  height: WATER_DEPTH,
+  depth: 700
+}, scene);
+
+waterVol.position.y = WATER_SURFACE_Y - WATER_DEPTH / 2;
+
+const waterVolMat = new BABYLON.StandardMaterial("waterVolMat", scene);
+waterVolMat.diffuseColor = color3(SETTINGS.waterColor);
+waterVolMat.alpha = 0.4;
+waterVolMat.backFaceCulling = false;
+waterVol.material = waterVolMat;
+waterVol.isPickable = false;
+
 
     /* ---------------- RAMPS ---------------- */
     const RAMPS = [
