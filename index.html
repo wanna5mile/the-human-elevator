@@ -86,11 +86,6 @@
 
   <canvas id="renderCanvas"></canvas>
 
-  <!-- AUDIO START OVERLAY -->
-  <div id="audioGate">
-    <span>Click Anywhere To Start</span>
-  </div>
-
   <div id="ui">
     <div id="coinCounter">Coins: <span id="coinsValue">0</span></div>
     <div id="multiplier" style="display:none;">
@@ -98,47 +93,21 @@
     </div>
   </div>
 
-  <script>
-    // Ensures background music works on all browsers
-    const gate = document.getElementById("audioGate");
 
-    gate.addEventListener("click", () => {
-      if (BABYLON.Engine.audioEngine && !BABYLON.Engine.audioEngine.unlocked) {
-        BABYLON.Engine.audioEngine.unlock();
-      }
-      gate.style.display = "none";
-    });
-  </script>
-  <script>
-    /* ============================================================
-   FULL MERGED & FIXED game.js (WORLD EXPANDED)
-   - Larger ground
-   - Natural city layout
-   - Roads system
-   - Hills repurposed as buildings
-   - Street lights added
-============================================================ */
+<script>
 window.addEventListener("DOMContentLoaded", () => {
   const canvas = document.getElementById("renderCanvas");
   const engine = new BABYLON.Engine(canvas, true);
 
   const SETTINGS = {
     groundTopColor: "#33FF4B",
-    groundSideColor: "#8B5A2B",
     roadColor: "#111111",
     buildingColor: "#BBBBBB",
-    windowColor: "#FFD966",
+    windowColor: new BABYLON.Color3(1, 0.85, 0.4),
     lightColor: new BABYLON.Color3(1, 0.9, 0.6),
-
-    cubeCount: 30,
-    hillCount: 16,
-    treeCount: 40,
-
     citySpacing: 40,
     roadWidth: 8,
-
-    coinMax: 32,
-    dayNightCycleMs: 5 * 60 * 1000
+    dayNightCycleMs: 180000
   };
 
   function rnd(min, max) { return Math.random() * (max - min) + min; }
@@ -150,32 +119,9 @@ window.addEventListener("DOMContentLoaded", () => {
     return m;
   }
 
-  /* ============================================================
-     ROAD CREATOR
-     Large flat black strips
-  ============================================================ */
-  function createRoad(scene, x, z, length, horizontal = true) {
-    const road = BABYLON.MeshBuilder.CreateBox("road", {
-      width: horizontal ? length : SETTINGS.roadWidth,
-      height: 0.2,
-      depth: horizontal ? SETTINGS.roadWidth : length
-    }, scene);
+  const buildings = [];
+  const streetLights = [];
 
-    road.position.set(x, 0.11, z);
-    road.material = createBoxMaterial(scene, SETTINGS.roadColor);
-
-    road.physicsImpostor = new BABYLON.PhysicsImpostor(
-      road,
-      BABYLON.PhysicsImpostor.BoxImpostor,
-      { mass: 0, friction: 1 },
-      scene
-    );
-    return road;
-  }
-
-  /* ============================================================
-     STREET LIGHT
-  ============================================================ */
   function createStreetLight(scene, x, z) {
     const pole = BABYLON.MeshBuilder.CreateCylinder("pole", {
       height: 8,
@@ -183,7 +129,7 @@ window.addEventListener("DOMContentLoaded", () => {
       diameterBottom: 0.4
     }, scene);
     pole.position.set(x, 4, z);
-    pole.material = createBoxMaterial(scene, "#333333");
+    pole.material = createBoxMaterial(scene, "#333");
 
     const bulb = BABYLON.MeshBuilder.CreateSphere("bulb", { diameter: 0.6 }, scene);
     bulb.position.set(x, 8.3, z);
@@ -193,93 +139,71 @@ window.addEventListener("DOMContentLoaded", () => {
     bulb.material = bulbMat;
 
     const light = new BABYLON.PointLight("streetLight", new BABYLON.Vector3(x, 8.3, z), scene);
-    light.intensity = 0.8;
-    light.range = 20;
+    light.intensity = 0.2;
+    light.range = 25;
 
-    return { pole, bulb, light };
+    streetLights.push({ material: bulbMat, light });
   }
 
-  /* ============================================================
-     BUILDING (repurposed hills)
-  ============================================================ */
   function createBuilding(scene, x, z) {
     const width = rnd(8, 14);
     const depth = rnd(8, 14);
     const height = rnd(10, 30);
 
-    const b = BABYLON.MeshBuilder.CreateBox("building", {
-      width,
-      height,
-      depth
-    }, scene);
-
+    const b = BABYLON.MeshBuilder.CreateBox("building", { width, height, depth }, scene);
     b.position.set(x, height/2, z);
+
     const mat = createBoxMaterial(scene, SETTINGS.buildingColor);
-    mat.emissiveColor = SETTINGS.windowColor.scale(0.15);
+    mat.emissiveColor = SETTINGS.windowColor.scale(0.05);
     b.material = mat;
 
-    b.physicsImpostor = new BABYLON.PhysicsImpostor(
-      b,
-      BABYLON.PhysicsImpostor.BoxImpostor,
-      { mass: 0, friction: 1 },
-      scene
-    );
-
-    return b;
+    buildings.push(mat);
   }
 
   function createScene() {
     const scene = new BABYLON.Scene(engine);
-    scene.enablePhysics(new BABYLON.Vector3(0, -9.81, 0), new BABYLON.CannonJSPlugin());
 
-    new BABYLON.HemisphericLight("hemi", new BABYLON.Vector3(0,1,0), scene).intensity = 0.8;
+    const hemi = new BABYLON.HemisphericLight("hemi", new BABYLON.Vector3(0,1,0), scene);
+    hemi.intensity = 1;
 
-    /* ---------------- GROUND ---------------- */
-    const groundSize = 600; // EXPANDED WORLD
+    scene.clearColor = new BABYLON.Color3(0.6, 0.8, 1);
 
     const ground = BABYLON.MeshBuilder.CreateGround("ground", {
-      width: groundSize,
-      height: groundSize
+      width: 600,
+      height: 600
     }, scene);
-
     ground.material = createBoxMaterial(scene, SETTINGS.groundTopColor);
-    ground.physicsImpostor = new BABYLON.PhysicsImpostor(
-      ground,
-      BABYLON.PhysicsImpostor.BoxImpostor,
-      { mass: 0 },
-      scene
-    );
 
-    /* ---------------- CITY GRID ---------------- */
-    const grid = SETTINGS.citySpacing;
-    for (let x = -groundSize/2 + grid; x < groundSize/2; x += grid) {
-      createRoad(scene, x, 0, groundSize, false);
-      createRoad(scene, 0, x, groundSize, true);
-
-      for (let z = -groundSize/2 + grid; z < groundSize/2; z += grid) {
-        if (Math.random() > 0.35) {
-          createBuilding(scene, x + rnd(-10,10), z + rnd(-10,10));
-        }
+    for (let x = -280; x < 280; x += SETTINGS.citySpacing) {
+      for (let z = -280; z < 280; z += SETTINGS.citySpacing) {
+        if (Math.random() > 0.35) createBuilding(scene, x, z);
+        if (Math.random() > 0.7) createStreetLight(scene, x + 10, z + 10);
       }
     }
 
-    /* ---------------- STREET LIGHTS ---------------- */
-    for (let x = -groundSize/2 + 20; x < groundSize/2; x += 40) {
-      for (let z = -groundSize/2 + 20; z < groundSize/2; z += 40) {
-        createStreetLight(scene, x, z);
-      }
-    }
-
-    /* ---------------- CAMERA ---------------- */
-    const camera = new BABYLON.ArcRotateCamera(
-      "cam",
-      Math.PI/2,
-      Math.PI/3,
-      120,
-      new BABYLON.Vector3(0, 0, 0),
-      scene
-    );
+    const camera = new BABYLON.ArcRotateCamera("cam", Math.PI/2, Math.PI/3, 120, BABYLON.Vector3.Zero(), scene);
     camera.attachControl(canvas, true);
+
+    // 🌗 DAY / NIGHT SYSTEM
+    scene.onBeforeRenderObservable.add(() => {
+      const t = (Date.now() % SETTINGS.dayNightCycleMs) / SETTINGS.dayNightCycleMs;
+      const nightFactor = Math.sin(t * Math.PI * 2) * 0.5 + 0.5;
+
+      hemi.intensity = 0.3 + (1 - nightFactor) * 0.9;
+      scene.clearColor = new BABYLON.Color3(
+        0.05 + (1 - nightFactor) * 0.6,
+        0.05 + (1 - nightFactor) * 0.6,
+        0.1 + (1 - nightFactor) * 0.7
+      );
+
+      buildings.forEach(mat => {
+        mat.emissiveColor = SETTINGS.windowColor.scale(nightFactor * 1.2);
+      });
+
+      streetLights.forEach(l => {
+        l.light.intensity = nightFactor * 1.5;
+      });
+    });
 
     return scene;
   }
@@ -288,7 +212,8 @@ window.addEventListener("DOMContentLoaded", () => {
   engine.runRenderLoop(() => scene.render());
   window.addEventListener("resize", () => engine.resize());
 });
-  </script>
+</script>
+
 
 </body>
 </html>
