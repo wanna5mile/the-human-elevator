@@ -1,4 +1,4 @@
-const bgMusic = new BABYLON.Sound("bgMusic", "bg.mp3", scene, null, {
+const bgMusic = new BABYLON.Sound("bgMusic", "bg.m4a", scene, null, {
   loop: true,
   autoplay: true,
   volume: 0.4
