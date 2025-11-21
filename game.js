@@ -125,26 +125,37 @@ window.addEventListener("DOMContentLoaded", () => {
     /* ---------------- GROUND ---------------- */
     const groundSize = 600; // EXPANDED WORLD
 
-    const ground = BABYLON.MeshBuilder.CreateGround("ground", {
-      width: groundSize,
-      height: groundSize
-    }, scene);
+const ground = BABYLON.MeshBuilder.CreateGround("ground", {
+  width: groundSize,
+  height: groundSize,
+  subdivisions: 4
+}, scene);
 
-    ground.material = createBoxMaterial(scene, SETTINGS.groundTopColor);
-    ground.physicsImpostor = new BABYLON.PhysicsImpostor(
-      ground,
-      BABYLON.PhysicsImpostor.BoxImpostor,
-      { mass: 0 },
-      scene
-    );
+// ✅ TRUE GREEN GRASS MATERIAL
+const groundMat = new BABYLON.StandardMaterial("groundMat", scene);
+groundMat.diffuseColor = BABYLON.Color3.FromHexString(SETTINGS.groundTopColor);
+groundMat.specularColor = BABYLON.Color3.Black();
+ground.material = gCITY GRID (FIXED & VISIBLE) ---------------- */
+const grid = SETTINGS.citySpacing;
 
-    /* ---------------- CITY GRID ---------------- */
-    const grid = SETTINGS.citySpacing;
-    for (let x = -groundSize/2 + grid; x < groundSize/2; x += grid) {
-      createRoad(scene, x, 0, groundSize, false);
-      createRoad(scene, 0, x, groundSize, true);
+for (let x = -groundSize/2; x <= groundSize/2; x += grid) {
+  createRoad(scene, x, 0, groundSize, false);
+}
 
-      for (let z = -groundSize/2 + grid; z < groundSize/2; z += grid) {
+for (let z = -groundSize/2; z <= groundSize/2; z += grid) {
+  createRoad(scene, 0, z, groundSize, true);
+}
+
+// ✅ Buildings placed between roads
+for (let x = -groundSize/2 + grid/2; x < groundSize/2; x += grid) {
+  for (let z = -groundSize/2 + grid/2; z < groundSize/2; z += grid) {
+    if (Math.random() > 0.3) {
+      createBuilding(scene, x + rnd(-8,8), z + rnd(-8,8));
+    }
+  }
+}
+
+/* ---------------- STREET LIGHTS ---------------- */dSize/2 + grid; z < groundSize/2; z += grid) {
         if (Math.random() > 0.35) {
           createBuilding(scene, x + rnd(-10,10), z + rnd(-10,10));
         }
