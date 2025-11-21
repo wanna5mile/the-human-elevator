@@ -72,43 +72,56 @@ window.addEventListener("DOMContentLoaded", () => {
     return mat;
   }
 
-  /* ============================================================
-     RAMP CREATOR (sealed)
-     - ExtrudeShape used but ensure backFaceCulling = false
-     - cap: BABYLON.Mesh.CAP_ALL for sealed ends
-     - single StandardMaterial (MultiMaterial unreliable on ExtrudeShape)
-  ============================================================ */
-  function makeTriWedge(scene, name, width=10, height=6, depth=8) {
-    // triangle shape in X-Y (base along X)
-    const tri = [
-      new BABYLON.Vector3(0, 0, 0),
-      new BABYLON.Vector3(width, 0, 0),
-      new BABYLON.Vector3(0, height, 0)
-    ];
-    const path = [ new BABYLON.Vector3(0,0,0), new BABYLON.Vector3(0,0,depth) ];
+/* ============================================================
+   TRUE SOLID RAMP (Right Triangle Prism)
+   - Not hollow
+   - Fully closed geometry
+   - Real slope for acceleration
+============================================================ */
+function makeTriWedge(scene, name, width = 10, height = 6, depth = 8) {
 
-    const ramp = BABYLON.MeshBuilder.ExtrudeShape(name, { shape: tri, path: path, cap: BABYLON.Mesh.CAP_ALL }, scene);
+  const ramp = BABYLON.MeshBuilder.CreatePolyhedron(name, {
+    custom: {
+      vertex: [
+        // bottom rectangle
+        [0, 0, 0],
+        [width, 0, 0],
+        [width, 0, depth],
+        [0, 0, depth],
 
-    // center it so top aligns as expected (top of ramp near +height)
-    ramp.position.y = height / 2;
+        // top slope edge
+        [0, height, depth]
+      ],
+      face: [
+        [0, 1, 2, 3],   // bottom
+        [0, 1, 4],      // slope front
+        [1, 2, 4],      // right side
+        [2, 3, 4],      // back slope
+        [3, 0, 4]       // left side
+      ]
+    }
+  }, scene);
 
-    // use a single material rendered double-sided so no holes are visible
-    const mat = createBoxMaterial(scene, "#A6A6A6", null, 1, name);
-    mat.backFaceCulling = false; // show both sides
-    mat.specularPower = 28;
-    ramp.material = mat;
+  // center it nicely
+  ramp.position.y = -2;
 
-    ramp.physicsImpostor = new BABYLON.PhysicsImpostor(
-      ramp,
-      BABYLON.PhysicsImpostor.MeshImpostor,
-      { mass: 0, friction: 1.0, restitution: 0 },
-      scene
-    );
+  const mat = createBoxMaterial(scene, "#A6A6A6", null, 1, name);
+  mat.backFaceCulling = false;
+  mat.specularPower = 28;
+  ramp.material = mat;
 
-    ramp.receiveShadows = true;
-    ramp.isPickable = false;
-    return ramp;
-  }
+  ramp.physicsImpostor = new BABYLON.PhysicsImpostor(
+    ramp,
+    BABYLON.PhysicsImpostor.MeshImpostor,
+    { mass: 0, friction: 1, restitution: 0 },
+    scene
+  );
+
+  ramp.receiveShadows = true;
+  ramp.isPickable = false;
+
+  return ramp;
+}
 
   /* ============================================================
      PYRAMID PLACER (unchanged)
