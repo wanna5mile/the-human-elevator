@@ -109,31 +109,24 @@ function createScene() {
   sun.position = new BABYLON.Vector3(0,50,0);
 
   /* ---------------- GROUND ---------------- */
-  const groundSize = 300;
-  const groundHeight = 10;
-  const groundDepth = 10;
-  const ground = BABYLON.MeshBuilder.CreateBox("ground", {
-    width: groundSize, height: groundHeight, depth: groundSize
-  }, scene);
-  ground.position.y = -groundHeight/2; // top at y=0
-
-  const matTop = new BABYLON.StandardMaterial("matTop", scene);
-  matTop.diffuseColor = BABYLON.Color3.FromHexString(SETTINGS.groundTopColor);
-  const matSide = new BABYLON.StandardMaterial("matSide", scene);
-  matSide.diffuseColor = BABYLON.Color3.FromHexString(SETTINGS.groundSideColor);
-  const multi = new BABYLON.MultiMaterial("groundMulti", scene);
-  multi.subMaterials = [matSide, matSide, matSide, matSide, matTop, matSide];
-  ground.material = multi;
-  ground.physicsImpostor = new BABYLON.PhysicsImpostor(ground, BABYLON.PhysicsImpostor.BoxImpostor, { mass:0, friction:2, restitution:0 }, scene);
+  const ground = BABYLON.MeshBuilder.CreateBox("ground", { width:300, height:10, depth:300 }, scene);
+  ground.position.y = -5;
+  const topMat = createBoxMaterial(scene, SETTINGS.groundTopColor);
+  const sideMat = createBoxMaterial(scene, SETTINGS.groundSideColor);
+  const mm = new BABYLON.MultiMaterial("groundMM", scene);
+  mm.subMaterials = [sideMat, sideMat, sideMat, sideMat, topMat, sideMat];
+  ground.material = mm;
+  ground.physicsImpostor = new BABYLON.PhysicsImpostor(ground, BABYLON.PhysicsImpostor.BoxImpostor, {mass:0, friction:1}, scene);
 
   /* ---------------- WATER ---------------- */
-  const water = BABYLON.MeshBuilder.CreateGround("water", { width: 700, height: 700 }, scene);
-  water.position.y = -4.2;
+  const water = BABYLON.MeshBuilder.CreateGround("water", { width:700, height:700, subdivisions:32 }, scene);
+  water.position.y = WATER_SURFACE_Y;
   const waterMat = new BABYLON.WaterMaterial("waterMat", scene);
-  waterMat.waveHeight = 0.35; waterMat.bumpHeight = 0.07; waterMat.windForce = 3.0;
-  waterMat.waterColor = new BABYLON.Color3.FromHexString(SETTINGS.waterColor);
+  waterMat.bumpTexture = new BABYLON.Texture("https://cdn.babylonjs.com/textures/waterbump.png", scene);
+  waterMat.windForce = -2; waterMat.waveHeight = 0.3; waterMat.waveLength = 0.1;
+  waterMat.waterColor = color3(SETTINGS.waterColor);
+  waterMat.colorBlendFactor = 0.3;
   water.material = waterMat;
-  waterMat.addToRenderList(ground);
 
   const waterVol = BABYLON.MeshBuilder.CreateBox("waterVol", {width:700, height:WATER_DEPTH, depth:700}, scene);
   waterVol.position.y = WATER_SURFACE_Y - WATER_DEPTH/2;
