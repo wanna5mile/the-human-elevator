@@ -1,11 +1,17 @@
-const bgMusic = new BABYLON.Sound("bgMusic", "bg.m4a", scene, null, {
-  loop: true,
-  autoplay: true,
-  volume: 0.4
+window.addEventListener("DOMContentLoaded", () => {
+  window.addEventListener("click", () => {
+    if (window.scene && !window.bgMusic) {
+      window.bgMusic = new BABYLON.Sound(
+        "bgMusic",
+        "music.mp3",   // change path if needed
+        scene,
+        null,
+        {
+          loop: true,
+          autoplay: true,
+          volume: 0.4
+        }
+      );
+    }
+  }, { once: true });
 });
-
-window.addEventListener("click", () => {
-  if (BABYLON.Engine.audioEngine && !BABYLON.Engine.audioEngine.unlocked) {
-    BABYLON.Engine.audioEngine.unlock();
-  }
-}, { once: true });
